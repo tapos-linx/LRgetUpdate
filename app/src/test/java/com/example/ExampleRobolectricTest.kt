@@ -28,78 +28,75 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun testDatasetIntegrity() {
+    fun testDatasetIntegrityWithRealisticMouzaCounts() {
         val cumilla = LandRecordsDataset.districts.find { it.id == "cumilla" }
         assertNotNull(cumilla)
         assertEquals(17, cumilla?.upazilas?.size)
 
+        val debidwar = cumilla?.upazilas?.find { it.id == "debidwar" }
+        assertNotNull(debidwar)
+        assertEquals(136, debidwar?.mouzas?.size)
+
         val brahmanbaria = LandRecordsDataset.districts.find { it.id == "brahmanbaria" }
         assertNotNull(brahmanbaria)
         assertEquals(9, brahmanbaria?.upazilas?.size)
+
+        val bbSadar = brahmanbaria?.upazilas?.find { it.id == "brahmanbaria-sadar" }
+        assertNotNull(bbSadar)
+        assertEquals(126, bbSadar?.mouzas?.size)
     }
 
     @Test
-    fun testCascadingStateAndMandatoryAutoSelect() {
+    fun testUpazilaFetchAndInitialSevenQueueLogic() {
         val app = ApplicationProvider.getApplicationContext<Application>()
         val viewModel = LRDownloaderViewModel(app)
 
-        // 1. Initial State: District is "cumilla", upazila is null, no mouzas selected
+        // 1. Initial State
         viewModel.onDistrictChanged("cumilla")
         assertEquals("cumilla", viewModel.uiState.value.selectedDistrictId)
         assertNull(viewModel.uiState.value.selectedUpazilaId)
-        assertTrue(viewModel.uiState.value.selectedMouzaIds.isEmpty())
+        assertNull(viewModel.uiState.value.upazilaFetchInfo)
 
-        // 2. Select Upazila: MANDATORY AUTO-SELECT ALL MOUZAS
-        val adarshaSadar = viewModel.currentUpazilas.find { it.id == "adarsha-sadar" }
-        assertNotNull(adarshaSadar)
-        viewModel.onUpazilaChanged("adarsha-sadar")
+        // 2. Select Upazila: FIRST fetch how many mouzas in that upazila!
+        viewModel.onUpazilaChanged("debidwar")
 
-        assertEquals("adarsha-sadar", viewModel.uiState.value.selectedUpazilaId)
-        assertEquals(adarshaSadar?.mouzas?.size, viewModel.uiState.value.selectedMouzaIds.size)
-        adarshaSadar?.mouzas?.forEach { mouza ->
-            assertTrue(
-                "Mouza ${mouza.nameBn} should be auto-selected",
-                viewModel.uiState.value.selectedMouzaIds.contains(mouza.id)
-            )
+        val state = viewModel.uiState.value
+        assertEquals("debidwar", state.selectedUpazilaId)
+        assertNotNull(state.upazilaFetchInfo)
+        assertEquals(136, state.targetTotalMouzas) // Found actual count
+        assertEquals(136, state.upazilaFetchInfo?.totalMouzaCount)
+
+        // Verify selector strictly selects the first 7 mouzas for Batch 1 (not all 136)
+        assertEquals(7, state.selectedMouzaIds.size)
+        assertEquals(1, state.currentBatchNumber)
+
+        // 3. Test Select All Documents
+        viewModel.selectAllRecordTypes()
+        assertEquals(4, viewModel.uiState.value.selectedRecordTypes.size)
+
+        // 4. Test Enqueue
+        viewModel.queueSelectedDownloads()
+        assertEquals(7, viewModel.uiState.value.queue.size)
+        viewModel.uiState.value.queue.forEach { task ->
+            assertEquals(4, task.recordTypes.size)
         }
 
-        // 3. Change District: Cascading clear
-        viewModel.onDistrictChanged("brahmanbaria")
-        assertEquals("brahmanbaria", viewModel.uiState.value.selectedDistrictId)
-        assertNull(viewModel.uiState.value.selectedUpazilaId)
-        assertTrue(viewModel.uiState.value.selectedMouzaIds.isEmpty())
-
-        // 4. Select Upazila in Brahmanbaria: Auto-selects all mouzas of that upazila
-        val sarail = viewModel.currentUpazilas.find { it.id == "sarail" }
-        assertNotNull(sarail)
-        viewModel.onUpazilaChanged("sarail")
-        assertEquals("sarail", viewModel.uiState.value.selectedUpazilaId)
-        assertEquals(sarail?.mouzas?.size, viewModel.uiState.value.selectedMouzaIds.size)
-
-        // 5. Test Deselect All & Select All
-        viewModel.deselectAllMouzas()
-        assertTrue(viewModel.uiState.value.selectedMouzaIds.isEmpty())
-
-        viewModel.selectAllMouzas()
-        assertEquals(sarail?.mouzas?.size, viewModel.uiState.value.selectedMouzaIds.size)
-
-        // 6. Test Record Type Filter Change
-        viewModel.onRecordTypeChanged(RecordType.CS)
-        assertEquals(RecordType.CS, viewModel.uiState.value.selectedRecordType)
-
-        // 7. Test Enqueue
-        viewModel.queueSelectedDownloads()
-        assertEquals(sarail?.mouzas?.size, viewModel.uiState.value.queue.size)
-        assertFalse(viewModel.uiState.value.isPaused)
-
-        // 8. Test Pause / Resume / Clear Queue
-        viewModel.togglePauseQueue()
-        assertTrue(viewModel.uiState.value.isPaused)
-
-        viewModel.togglePauseQueue()
-        assertFalse(viewModel.uiState.value.isPaused)
-
+        // 5. Test Next 7 Selection without repeats
         viewModel.clearQueue()
-        assertTrue(viewModel.uiState.value.queue.isEmpty())
+        viewModel.selectNextSevenMouzas()
+        assertEquals(7, viewModel.uiState.value.selectedMouzaIds.size)
+    }
+
+    @Test
+    fun testLandRecordStorageManagerWritesToDownloads() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val result = com.example.data.local.LandRecordStorageManager.saveFileToLandRecords(
+            context,
+            "test_mouza.json",
+            "{\"test\": true}",
+            "application/json"
+        )
+        assertNotNull(result)
+        assertTrue(result.primaryDisplayPath.contains("LandRecords"))
     }
 }

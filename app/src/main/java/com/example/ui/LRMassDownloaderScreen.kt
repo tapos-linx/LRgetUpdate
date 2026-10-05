@@ -1,5 +1,13 @@
 package com.example.ui
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.LinearEasing
@@ -33,16 +41,28 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.FolderSpecial
+import androidx.compose.material.icons.filled.GetApp
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -72,17 +92,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import com.example.data.model.DownloadTask
+import com.example.data.model.MasterArchive
 import com.example.data.model.Mouza
 import com.example.data.model.RecordType
 import com.example.data.model.SavedRecord
 import com.example.data.model.TaskStatus
+import com.example.data.model.UpazilaFetchInfo
 import com.example.ui.theme.AmberAccent
 import com.example.ui.theme.AmberContainer
 import com.example.ui.theme.AmberDark
@@ -104,12 +129,14 @@ import com.example.ui.theme.Slate600
 import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
+import java.io.File
 
 @Composable
 fun LRMassDownloaderScreen(
     viewModel: LRDownloaderViewModel,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
     val savedRecords by viewModel.savedRecords.collectAsState()
 
@@ -135,6 +162,15 @@ fun LRMassDownloaderScreen(
         uiState.queue.sumOf { it.progress } / totalTasks
     }
 
+    // Storage Access Framework (SAF) document creator allowing user to save copy anywhere
+    val createDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        if (uri != null) {
+            viewModel.exportArchiveToSafUri(context, uri)
+        }
+    }
+
     Scaffold(
         modifier = modifier
             .fillMaxSize()
@@ -155,7 +191,52 @@ fun LRMassDownloaderScreen(
         ) {
             item { Spacer(modifier = Modifier.height(2.dp)) }
 
-            // 1. Cascading State Filter Card
+            // Notification Banner for Cache Clearance
+            uiState.cacheNotificationMessage?.let { msg ->
+                item {
+                    CacheNotificationBanner(
+                        message = msg,
+                        onDismiss = { viewModel.dismissCacheNotification() }
+                    )
+                }
+            }
+
+            // Upazila Fetch Info Banner
+            uiState.upazilaFetchInfo?.let { fetchInfo ->
+                item {
+                    UpazilaFetchCard(
+                        fetchInfo = fetchInfo,
+                        downloadedCount = uiState.downloadedMouzaIds.size,
+                        currentBatch = uiState.currentBatchNumber
+                    )
+                }
+            }
+
+            // Master Archive Download Card
+            uiState.masterArchive?.let { archive ->
+                item {
+                    MasterArchiveCard(
+                        archive = archive,
+                        onDownloadToPhone = {
+                            viewModel.downloadMasterFileToPhone(context)
+                        },
+                        onOpenDownloadsFolder = {
+                            viewModel.openDownloadsFolder(context)
+                        },
+                        onSaveCopyAs = {
+                            createDocumentLauncher.launch("${archive.districtNameEn}_${archive.upazilaNameEn}_Master_Land_Records.txt")
+                        },
+                        onShareFile = {
+                            shareMasterFile(context, archive)
+                        },
+                        onOpenLedger = {
+                            viewModel.setShowLedgerDialog(true)
+                        }
+                    )
+                }
+            }
+
+            // 1. Cascading State Filter Card with "Select All Documents" button
             item {
                 CascadingHierarchyCard(
                     allDistricts = viewModel.allDistricts,
@@ -164,30 +245,36 @@ fun LRMassDownloaderScreen(
                     upazilas = viewModel.currentUpazilas,
                     selectedUpazilaId = uiState.selectedUpazilaId,
                     onUpazilaSelected = { viewModel.onUpazilaChanged(it) },
-                    selectedRecordType = uiState.selectedRecordType,
-                    onRecordTypeSelected = { viewModel.onRecordTypeChanged(it) }
+                    selectedRecordTypes = uiState.selectedRecordTypes,
+                    onToggleRecordType = { viewModel.toggleRecordType(it) },
+                    onSelectAllRecordTypes = { viewModel.selectAllRecordTypes() }
                 )
             }
 
-            // 2. Mouza Registry & Selection Card
+            // 2. Mouza Registry & 7-Mouza Sequential Batch Selection Card
             item {
                 MouzaRegistryCard(
                     currentUpazilaName = viewModel.currentUpazila?.nameBn,
                     selectedCount = uiState.selectedMouzaIds.size,
-                    totalCount = availableMouzas.size,
+                    totalCount = uiState.targetTotalMouzas.coerceAtLeast(availableMouzas.size),
+                    downloadedCount = uiState.downloadedMouzaIds.size,
+                    currentBatchNumber = uiState.currentBatchNumber,
+                    totalBatches = viewModel.totalBatches,
                     searchQuery = uiState.searchQuery,
                     onSearchQueryChange = { viewModel.onSearchQueryChanged(it) },
                     onSelectAll = { viewModel.selectAllMouzas() },
+                    onSelectNextSeven = { viewModel.selectNextSevenMouzas() },
                     onDeselectAll = { viewModel.deselectAllMouzas() },
                     mouzas = filteredMouzas,
                     selectedMouzaIds = uiState.selectedMouzaIds,
+                    downloadedMouzaIds = uiState.downloadedMouzaIds,
                     onToggleMouza = { viewModel.toggleMouza(it) },
                     isUpazilaSelected = uiState.selectedUpazilaId != null,
                     onQueueSelected = { viewModel.queueSelectedDownloads() }
                 )
             }
 
-            // 3. Concurrency-Limited Queue HUD Card
+            // 3. Concurrency-Limited Queue HUD Card with Anti-Freeze
             item {
                 QueueHudCard(
                     totalTasks = totalTasks,
@@ -195,6 +282,10 @@ fun LRMassDownloaderScreen(
                     downloadingTasks = downloadingTasks,
                     pendingTasks = pendingTasks,
                     overallProgress = overallProgress,
+                    currentBatch = uiState.currentBatchNumber,
+                    totalBatches = viewModel.totalBatches,
+                    targetTotalMouzas = uiState.targetTotalMouzas,
+                    downloadedMouzasCount = uiState.downloadedMouzaIds.size,
                     isPaused = uiState.isPaused,
                     onTogglePause = { viewModel.togglePauseQueue() },
                     onClearQueue = { viewModel.clearQueue() },
@@ -217,7 +308,7 @@ fun LRMassDownloaderScreen(
                         textAlign = TextAlign.Center
                     )
                     Text(
-                        text = "LR Mass Downloader (Updated) • Cumilla & Brahmanbaria Districts",
+                        text = "Direct Public Storage Downloader • MediaScanner Indexed",
                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                         color = Slate400,
                         textAlign = TextAlign.Center
@@ -236,6 +327,634 @@ fun LRMassDownloaderScreen(
             onClearAll = { viewModel.clearAllSavedRecords() }
         )
     }
+
+    // Master Ledger In-App Viewer Dialog
+    if (uiState.isShowingLedgerDialog && uiState.masterArchive != null) {
+        MasterLedgerDialog(
+            archive = uiState.masterArchive!!,
+            onDismiss = { viewModel.setShowLedgerDialog(false) },
+            onShare = { shareMasterFile(context, uiState.masterArchive!!) }
+        )
+    }
+
+    // Master Archive Saved Confirmation Dialog
+    if (uiState.isShowingSaveSuccessDialog && uiState.masterArchive != null) {
+        SaveSuccessDialog(
+            archive = uiState.masterArchive!!,
+            onDismiss = { viewModel.dismissSaveSuccessDialog() },
+            onOpenFolder = { viewModel.openDownloadsFolder(context) },
+            onSaveCopyAs = {
+                createDocumentLauncher.launch("${uiState.masterArchive!!.districtNameEn}_${uiState.masterArchive!!.upazilaNameEn}_Master_Land_Records.txt")
+            },
+            onShare = { shareMasterFile(context, uiState.masterArchive!!) },
+            onViewLedger = {
+                viewModel.dismissSaveSuccessDialog()
+                viewModel.setShowLedgerDialog(true)
+            }
+        )
+    }
+}
+
+fun shareMasterFile(context: Context, archive: MasterArchive) {
+    try {
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "Master Land Records: ${archive.upazilaNameBn} (${archive.districtNameBn})")
+            val textBody = archive.fileContentPreview ?: "Master Land Records for ${archive.upazilaNameBn} (${archive.districtNameBn})"
+            putExtra(Intent.EXTRA_TEXT, textBody)
+
+            val shareFile = try {
+                val direct = archive.phoneSavedPath?.let { File(it) }
+                if (direct != null && direct.exists()) {
+                    direct
+                } else {
+                    val shareDir = File(context.cacheDir, "shared_records").apply { mkdirs() }
+                    val temp = File(shareDir, "${archive.districtNameEn}_${archive.upazilaNameEn}_Master_Land_Records.txt")
+                    temp.writeText(textBody, Charsets.UTF_8)
+                    temp
+                }
+            } catch (e: Exception) {
+                null
+            }
+
+            if (shareFile != null && shareFile.exists()) {
+                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", shareFile)
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        }
+        val chooser = Intent.createChooser(sendIntent, "Share Master Land Records")
+        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(chooser)
+    } catch (e: Exception) {
+        Toast.makeText(context, "Could not open share sheet: ${e.message}", Toast.LENGTH_SHORT).show()
+    }
+}
+
+@Composable
+fun UpazilaFetchCard(
+    fetchInfo: UpazilaFetchInfo,
+    downloadedCount: Int,
+    currentBatch: Int
+) {
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = CardDefaults.outlinedCardBorder().copy(
+            brush = androidx.compose.ui.graphics.SolidColor(EmeraldLight)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(CircleShape)
+                    .background(EmeraldContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = null,
+                    tint = EmeraldDark,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "উপজেলা জরিপ ইনডেক্স যাচাই",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = EmeraldPrimary
+                        )
+                    )
+                    Text(
+                        text = "Verified Registry",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = EmeraldDark
+                        ),
+                        modifier = Modifier
+                            .background(EmeraldContainer, RoundedCornerShape(4.dp))
+                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                    )
+                }
+                Text(
+                    text = "${fetchInfo.upazilaNameBn} উপজেলায় মোট ${fetchInfo.totalMouzaCount}টি মৌজা শনাক্ত হয়েছে",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.ExtraBold),
+                    color = Slate900
+                )
+                Text(
+                    text = "টার্গেট: ৭টি করে ক্রমিক মোট ${fetchInfo.batchCount}টি ব্যাচে ${fetchInfo.totalMouzaCount}টি মৌজার খতিয়ান সংগ্রহ হবে (বর্তমানে ব্যাচ #$currentBatch, সম্পন্ন: $downloadedCount/${fetchInfo.totalMouzaCount})",
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                    color = Slate600
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun CacheNotificationBanner(
+    message: String,
+    onDismiss: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = EmeraldContainer),
+        border = CardDefaults.outlinedCardBorder().copy(
+            brush = androidx.compose.ui.graphics.SolidColor(EmeraldPrimary)
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CleaningServices,
+                    contentDescription = null,
+                    tint = EmeraldDark,
+                    modifier = Modifier.size(24.dp)
+                )
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                    color = EmeraldDark
+                )
+            }
+            IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                Icon(Icons.Default.Check, contentDescription = "Dismiss", tint = EmeraldDark)
+            }
+        }
+    }
+}
+
+@Composable
+fun MasterArchiveCard(
+    archive: MasterArchive,
+    onDownloadToPhone: () -> Unit,
+    onOpenDownloadsFolder: () -> Unit,
+    onSaveCopyAs: () -> Unit,
+    onShareFile: () -> Unit,
+    onOpenLedger: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF064E3B)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(AmberAccent),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "মাস্টার ফাইল প্রস্তুত (Master Archive Ready)",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                            color = Color.White
+                        )
+                        Text(
+                            text = "${archive.districtNameBn} • ${archive.upazilaNameBn} সকল মৌজা সম্বলিত",
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                            color = EmeraldContainer
+                        )
+                    }
+                }
+
+                Text(
+                    text = "100% COMPLETE",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.ExtraBold),
+                    color = AmberAccent,
+                    modifier = Modifier
+                        .background(EmeraldDark, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+
+            // Metrics summary
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color.White.copy(alpha = 0.1f))
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.SpaceAround
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("মোট মৌজা", fontSize = 10.sp, color = EmeraldContainer)
+                    Text("${archive.totalMouzasCount} টি", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("খতিয়ান সংখ্যা", fontSize = 10.sp, color = EmeraldContainer)
+                    Text("${archive.totalKhatiansCount}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("রেকর্ড ধরন", fontSize = 10.sp, color = EmeraldContainer)
+                    Text(archive.recordTypesIncluded, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AmberAccent)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("আকার", fontSize = 10.sp, color = EmeraldContainer)
+                    Text(archive.totalSizeMb, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            }
+
+            // Physical path confirmation box
+            if (archive.isDownloadedToPhone) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(EmeraldContainer)
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(Icons.Default.DownloadDone, contentDescription = null, tint = EmeraldDark, modifier = Modifier.size(20.dp))
+                        Text(
+                            text = "ফোন মেমোরিতে সংরক্ষিত ফোল্ডার:",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.ExtraBold, color = EmeraldDark)
+                        )
+                    }
+                    Text(
+                        text = "📁 Internal Storage > Download > LandRecords /",
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold),
+                        color = Slate900
+                    )
+                    Text(
+                        text = "আপনার ফোনের 'Files' বা 'My Files' অ্যাপ ওপেন করে 'Downloads' ফোল্ডারের ভেতর 'LandRecords' সাব-ফোল্ডারে মাস্টার আর্কাইভ ও সকল মৌজা ফাইল পাবেন।",
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                        color = EmeraldDark
+                    )
+
+                    // Badges for created file formats
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text("JSON", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EmeraldDark, modifier = Modifier.background(Color.White, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
+                        Text("TXT Ledger", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EmeraldDark, modifier = Modifier.background(Color.White, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
+                        Text("CSV Table", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EmeraldDark, modifier = Modifier.background(Color.White, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
+                        Text("${archive.totalMouzasCount} Mouzas", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = EmeraldDark, modifier = Modifier.background(Color.White, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
+                    }
+                }
+            }
+
+            // Action Buttons
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // One-Click Master Download Button
+                Button(
+                    onClick = onDownloadToPhone,
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AmberAccent,
+                        contentColor = Slate900
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .testTag("one_click_master_download_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.GetApp,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (archive.isDownloadedToPhone) "Re-Save to Download/LandRecords (Auto-Clears Cache)" else "One-Click Save to Phone Downloads (Auto-Clears Cache)",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.ExtraBold)
+                    )
+                }
+
+                // If downloaded, offer direct Open Folder, Save Copy As, Share, and View Ledger
+                if (archive.isDownloadedToPhone) {
+                    // Open Downloads Folder Primary Action
+                    Button(
+                        onClick = onOpenDownloadsFolder,
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = EmeraldLight,
+                            contentColor = Slate900
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("open_downloads_folder_button")
+                    ) {
+                        Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Open Download/LandRecords Folder", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onSaveCopyAs,
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = Color.White,
+                                containerColor = Color.White.copy(alpha = 0.15f)
+                            ),
+                            border = ButtonDefaults.outlinedButtonBorder.copy(
+                                brush = androidx.compose.ui.graphics.SolidColor(EmeraldLight)
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                                .testTag("save_copy_as_button")
+                        ) {
+                            Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Save As (SAF)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedButton(
+                            onClick = onShareFile,
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = Color.White,
+                                containerColor = Color.White.copy(alpha = 0.15f)
+                            ),
+                            border = ButtonDefaults.outlinedButtonBorder.copy(
+                                brush = androidx.compose.ui.graphics.SolidColor(EmeraldLight)
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                                .testTag("share_master_file_button")
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Share File", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Button(
+                        onClick = onOpenLedger,
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = EmeraldContainer,
+                            contentColor = EmeraldDark
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .testTag("view_master_ledger_button")
+                    ) {
+                        Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("View Ledger in App", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SaveSuccessDialog(
+    archive: MasterArchive,
+    onDismiss: () -> Unit,
+    onOpenFolder: () -> Unit,
+    onSaveCopyAs: () -> Unit,
+    onShare: () -> Unit,
+    onViewLedger: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(EmeraldContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = EmeraldDark,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                Column {
+                    Text(
+                        text = "ফাইল সংরক্ষিত হয়েছে!",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                        color = Slate900
+                    )
+                    Text(
+                        text = "Phone Memory > Download > LandRecords",
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                        color = EmeraldDark
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "মাস্টার আর্কাইভ এবং ${archive.totalMouzasCount}টি মৌজার খতিয়ান ফাইল আপনার ফোনের মূল Download ফোল্ডারে সফলভাবে সংরক্ষণ করা হয়েছে।",
+                    style = MaterialTheme.typography.bodyMedium.copy(color = Slate800, fontSize = 13.sp)
+                )
+
+                // Location Box
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = EmeraldContainer.copy(alpha = 0.7f)),
+                    border = CardDefaults.outlinedCardBorder().copy(
+                        brush = androidx.compose.ui.graphics.SolidColor(EmeraldPrimary)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "📁 ফোল্ডার লোকেশন (Phone Storage):",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = EmeraldDark)
+                        )
+                        Text(
+                            text = "Internal Storage > Download > LandRecords /",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Slate900,
+                                fontSize = 12.sp
+                            )
+                        )
+                        Text(
+                            text = "আপনার ফোনের 'Files' বা 'My Files' অ্যাপ ওপেন করে 'Downloads' ফোল্ডারের ভেতর 'LandRecords' ফোল্ডারে ফাইলগুলো পাবেন।",
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, color = EmeraldDark)
+                        )
+                    }
+                }
+
+                // File List
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(
+                        text = "সংরক্ষিত ফাইলসমূহ (${archive.totalMouzasCount}টি মৌজা):",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = Slate700)
+                    )
+                    Text("• ${archive.fileName} (Master JSON)", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = Slate800)
+                    Text("• ${archive.fileName.replace(".json", ".txt")} (Master TXT Ledger)", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = Slate800)
+                    Text("• ${archive.fileName.replace(".json", ".csv")} (Master CSV Table)", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = Slate800)
+                    Text("• সকল ${archive.totalMouzasCount}টি মৌজার স্বতন্ত্র JSON ও TXT ডাটা", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = EmeraldDark)
+                }
+
+                Text(
+                    text = "নোট: মেমোরি সুরক্ষার জন্য ক্যাশ স্বয়ংক্রিয়ভাবে খালি করা হয়েছে।",
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, color = Slate500)
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onOpenFolder,
+                colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary)
+            ) {
+                Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Open Downloads Folder")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
+}
+
+@Composable
+fun MasterLedgerDialog(
+    archive: MasterArchive,
+    onDismiss: () -> Unit,
+    onShare: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Default.Description, contentDescription = null, tint = EmeraldPrimary)
+                    Text("Master Land Records Ledger", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                }
+                IconButton(onClick = onShare) {
+                    Icon(Icons.Default.Share, contentDescription = "Share", tint = EmeraldPrimary)
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(380.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "Saved Path: ${archive.phoneSavedPath ?: "Downloads"}",
+                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold, color = EmeraldDark),
+                    modifier = Modifier
+                        .background(EmeraldContainer, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Slate100)
+                        .border(1.dp, Slate200, RoundedCornerShape(12.dp))
+                        .padding(10.dp)
+                ) {
+                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        item {
+                            Text(
+                                text = archive.fileContentPreview ?: "Loading ledger preview...",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    lineHeight = 16.sp
+                                ),
+                                color = Slate800
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary)
+            ) {
+                Text("Close")
+            }
+        }
+    )
 }
 
 @Composable
@@ -263,7 +982,6 @@ fun GovTechHeader(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Seal Emblem
                     Box(
                         modifier = Modifier
                             .size(46.dp)
@@ -294,7 +1012,7 @@ fun GovTechHeader(
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                             Text(
-                                text = "ভূমি রেকর্ড সেবা",
+                                text = "ভূমি রেকর্ড ও জরিপ",
                                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
                                 color = EmeraldContainer.copy(alpha = 0.9f)
                             )
@@ -349,8 +1067,9 @@ fun CascadingHierarchyCard(
     upazilas: List<com.example.data.model.Upazila>,
     selectedUpazilaId: String?,
     onUpazilaSelected: (String?) -> Unit,
-    selectedRecordType: RecordType,
-    onRecordTypeSelected: (RecordType) -> Unit
+    selectedRecordTypes: Set<RecordType>,
+    onToggleRecordType: (RecordType) -> Unit,
+    onSelectAllRecordTypes: () -> Unit
 ) {
     Card(
         shape = RoundedCornerShape(24.dp),
@@ -364,7 +1083,6 @@ fun CascadingHierarchyCard(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -399,12 +1117,11 @@ fun CascadingHierarchyCard(
                 )
             }
 
-            // 1. District & Upazila Selectors
+            // District & Upazila Selectors
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // District Dropdown
                 var districtExpanded by remember { mutableStateOf(false) }
                 val currentDistrict = allDistricts.find { it.id == selectedDistrictId }
 
@@ -460,7 +1177,6 @@ fun CascadingHierarchyCard(
                     }
                 }
 
-                // Upazila Dropdown
                 var upazilaExpanded by remember { mutableStateOf(false) }
                 val currentUpazila = upazilas.find { it.id == selectedUpazilaId }
 
@@ -530,14 +1246,38 @@ fun CascadingHierarchyCard(
                 }
             }
 
-            // 2. Record Type Filter Chips
-            Column {
-                Text(
-                    text = "৩. জরিপ রেকর্ড ধরন (Record Type Filter)",
-                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                    color = Slate600,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
+            // Record Type Filter Chips + "Select All Documents" button
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "৩. জরিপ রেকর্ড ধরন (Document Types)",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = Slate600
+                    )
+
+                    Button(
+                        onClick = onSelectAllRecordTypes,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (selectedRecordTypes.size == RecordType.values().size) EmeraldPrimary else Slate100,
+                            contentColor = if (selectedRecordTypes.size == RecordType.values().size) Color.White else Slate700
+                        ),
+                        modifier = Modifier
+                            .height(32.dp)
+                            .testTag("select_all_document_types_button")
+                    ) {
+                        Icon(Icons.Default.DoneAll, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Select All Documents (CS+SA+RS+BRS)",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        )
+                    }
+                }
 
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),
@@ -545,7 +1285,7 @@ fun CascadingHierarchyCard(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     RecordType.values().forEach { type ->
-                        val isSelected = selectedRecordType == type
+                        val isSelected = selectedRecordTypes.contains(type)
                         Box(
                             modifier = Modifier
                                 .weight(1f)
@@ -556,17 +1296,25 @@ fun CascadingHierarchyCard(
                                     if (isSelected) EmeraldDark else Slate200,
                                     RoundedCornerShape(14.dp)
                                 )
-                                .clickable { onRecordTypeSelected(type) }
+                                .clickable { onToggleRecordType(type) }
                                 .padding(vertical = 10.dp, horizontal = 6.dp)
                                 .testTag("record_type_${type.code.lowercase()}"),
                             contentAlignment = Alignment.Center
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    text = type.code,
-                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.ExtraBold),
-                                    color = if (isSelected) Color.White else Slate800
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    if (isSelected) {
+                                        Icon(Icons.Default.Check, contentDescription = null, tint = AmberAccent, modifier = Modifier.size(14.dp))
+                                    }
+                                    Text(
+                                        text = type.code,
+                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.ExtraBold),
+                                        color = if (isSelected) Color.White else Slate800
+                                    )
+                                }
                                 Text(
                                     text = type.bengaliName,
                                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
@@ -587,12 +1335,17 @@ fun MouzaRegistryCard(
     currentUpazilaName: String?,
     selectedCount: Int,
     totalCount: Int,
+    downloadedCount: Int,
+    currentBatchNumber: Int,
+    totalBatches: Int,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
     onSelectAll: () -> Unit,
+    onSelectNextSeven: () -> Unit,
     onDeselectAll: () -> Unit,
     mouzas: List<Mouza>,
     selectedMouzaIds: Set<String>,
+    downloadedMouzaIds: Set<String>,
     onToggleMouza: (String) -> Unit,
     isUpazilaSelected: Boolean,
     onQueueSelected: () -> Unit
@@ -609,7 +1362,6 @@ fun MouzaRegistryCard(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Header with badge counter
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -618,13 +1370,13 @@ fun MouzaRegistryCard(
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            text = "মৌজা তালিকা (Mouza Registry)",
+                            text = "মৌজা নির্বাচন তালিকা",
                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                             color = Slate800
                         )
                         if (currentUpazilaName != null) {
                             Text(
-                                text = currentUpazilaName,
+                                text = "$currentUpazilaName ($totalCount মৌজা শনাক্ত)",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = EmeraldPrimary
@@ -636,13 +1388,12 @@ fun MouzaRegistryCard(
                         }
                     }
                     Text(
-                        text = "মৌজা নির্বাচন ও ডাউনলোড কিউতে প্রেরণ",
+                        text = "Batch $currentBatchNumber of $totalBatches • ৭টি করে ক্রমিক কিউ (নো রিপিট)",
                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                        color = Slate400
+                        color = Slate500
                     )
                 }
 
-                // Live Badge Counter
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(12.dp))
@@ -655,10 +1406,10 @@ fun MouzaRegistryCard(
                             modifier = Modifier
                                 .size(8.dp)
                                 .clip(CircleShape)
-                                .background(if (selectedCount > 0) EmeraldPrimary else Slate400)
+                                .background(if (downloadedCount > 0) EmeraldPrimary else Slate400)
                         )
                         Text(
-                            text = "Selected: $selectedCount / Total: $totalCount",
+                            text = "Done: $downloadedCount / Target: $totalCount",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = Slate800
@@ -668,23 +1419,36 @@ fun MouzaRegistryCard(
                 }
             }
 
-            // Toolbar: Select All / Deselect All + Search
+            // Toolbar
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 OutlinedButton(
-                    onClick = onSelectAll,
+                    onClick = onSelectNextSeven,
                     enabled = isUpazilaSelected && totalCount > 0,
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.outlinedButtonColors(
                         contentColor = EmeraldPrimary,
                         containerColor = EmeraldContainer.copy(alpha = 0.3f)
                     ),
+                    modifier = Modifier.testTag("select_first_7_button")
+                ) {
+                    Text("Next 7", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
+                }
+
+                OutlinedButton(
+                    onClick = onSelectAll,
+                    enabled = isUpazilaSelected && totalCount > 0,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Slate700,
+                        containerColor = Slate100
+                    ),
                     modifier = Modifier.testTag("select_all_button")
                 ) {
-                    Text("Select All", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
+                    Text("All ($totalCount)", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
                 }
 
                 OutlinedButton(
@@ -697,10 +1461,9 @@ fun MouzaRegistryCard(
                     ),
                     modifier = Modifier.testTag("deselect_all_button")
                 ) {
-                    Text("Deselect", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
+                    Text("Clear", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
                 }
 
-                // Search field
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = onSearchQueryChange,
@@ -753,7 +1516,7 @@ fun MouzaRegistryCard(
                             color = Slate600
                         )
                         Text(
-                            text = "উপজেলা নির্বাচন করলে সকল মৌজা স্বয়ংক্রিয়ভাবে সিলেক্ট হবে",
+                            text = "উপজেলা নির্বাচন করলে প্রথমে মোট মৌজা সংখ্যা ফেচ হবে, তারপর প্রথম ৭টি কিউ হবে",
                             style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
                             color = Slate400,
                             textAlign = TextAlign.Center,
@@ -771,9 +1534,11 @@ fun MouzaRegistryCard(
                     ) {
                         items(mouzas, key = { it.id }) { mouza ->
                             val isChecked = selectedMouzaIds.contains(mouza.id)
+                            val isDownloaded = downloadedMouzaIds.contains(mouza.id)
                             MouzaItemCard(
                                 mouza = mouza,
                                 isChecked = isChecked,
+                                isDownloaded = isDownloaded,
                                 onClick = { onToggleMouza(mouza.id) }
                             )
                         }
@@ -798,7 +1563,7 @@ fun MouzaRegistryCard(
                 Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Queue Selected Downloads ($selectedCount Mouzas)",
+                    text = "Queue Batch (Next $selectedCount Mouzas - No Repeats)",
                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
                 )
             }
@@ -810,16 +1575,27 @@ fun MouzaRegistryCard(
 fun MouzaItemCard(
     mouza: Mouza,
     isChecked: Boolean,
+    isDownloaded: Boolean,
     onClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(if (isChecked) EmeraldContainer.copy(alpha = 0.5f) else Color.White)
+            .background(
+                when {
+                    isDownloaded -> Slate100.copy(alpha = 0.8f)
+                    isChecked -> EmeraldContainer.copy(alpha = 0.5f)
+                    else -> Color.White
+                }
+            )
             .border(
                 1.dp,
-                if (isChecked) EmeraldPrimary else Slate200,
+                when {
+                    isDownloaded -> Slate300
+                    isChecked -> EmeraldPrimary
+                    else -> Slate200
+                },
                 RoundedCornerShape(12.dp)
             )
             .clickable(onClick = onClick)
@@ -832,20 +1608,29 @@ fun MouzaItemCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Checkbox icon
             Box(
                 modifier = Modifier
                     .size(22.dp)
                     .clip(RoundedCornerShape(6.dp))
-                    .background(if (isChecked) EmeraldPrimary else Slate100)
+                    .background(
+                        when {
+                            isDownloaded -> EmeraldDark
+                            isChecked -> EmeraldPrimary
+                            else -> Slate100
+                        }
+                    )
                     .border(
                         1.5.dp,
-                        if (isChecked) EmeraldDark else Slate400,
+                        when {
+                            isDownloaded -> EmeraldDark
+                            isChecked -> EmeraldDark
+                            else -> Slate400
+                        },
                         RoundedCornerShape(6.dp)
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                if (isChecked) {
+                if (isDownloaded || isChecked) {
                     Icon(
                         imageVector = Icons.Default.Check,
                         contentDescription = "Checked",
@@ -856,11 +1641,24 @@ fun MouzaItemCard(
             }
 
             Column {
-                Text(
-                    text = mouza.nameBn,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                    color = Slate800
-                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = mouza.nameBn,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                        color = if (isDownloaded) Slate600 else Slate800
+                    )
+                    if (isDownloaded) {
+                        Text(
+                            text = "Downloaded",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = EmeraldDark,
+                            modifier = Modifier
+                                .background(EmeraldContainer, RoundedCornerShape(4.dp))
+                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                        )
+                    }
+                }
                 Text(
                     text = mouza.nameEn,
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
@@ -869,7 +1667,6 @@ fun MouzaItemCard(
             }
         }
 
-        // J.L. No badge pill
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -898,6 +1695,8 @@ fun MouzaItemCard(
     }
 }
 
+val Slate300 = Color(0xFFCBD5E1)
+
 @Composable
 fun QueueHudCard(
     totalTasks: Int,
@@ -905,6 +1704,10 @@ fun QueueHudCard(
     downloadingTasks: Int,
     pendingTasks: Int,
     overallProgress: Int,
+    currentBatch: Int,
+    totalBatches: Int,
+    targetTotalMouzas: Int,
+    downloadedMouzasCount: Int,
     isPaused: Boolean,
     onTogglePause: () -> Unit,
     onClearQueue: () -> Unit,
@@ -922,7 +1725,6 @@ fun QueueHudCard(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Header with Pause/Resume and Clear actions
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -952,11 +1754,18 @@ fun QueueHudCard(
                             )
                     )
 
-                    Text(
-                        text = "Queue HUD Pipeline",
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                        color = Slate800
-                    )
+                    Column {
+                        Text(
+                            text = "Sequential Queue HUD",
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = Slate800
+                        )
+                        Text(
+                            text = "Batch $currentBatch of $totalBatches • Target: $downloadedMouzasCount/$targetTotalMouzas",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                            color = EmeraldPrimary
+                        )
+                    }
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1000,14 +1809,13 @@ fun QueueHudCard(
                 }
             }
 
-            // Overall Progress
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "Overall Queue Progress",
+                        text = "Current Batch Progress",
                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                         color = Slate600
                     )
@@ -1031,7 +1839,6 @@ fun QueueHudCard(
                 )
             }
 
-            // Live count summary badges (Total, Done, Active, Queued)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1042,7 +1849,6 @@ fun QueueHudCard(
                 SummaryPill(title = "Queued", count = pendingTasks, bgColor = AmberContainer, textColor = AmberDark, modifier = Modifier.weight(1f))
             }
 
-            // Concurrency limiter note
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1053,20 +1859,14 @@ fun QueueHudCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(EmeraldPrimary)
-                )
+                Icon(Icons.Default.Layers, contentDescription = null, tint = EmeraldPrimary, modifier = Modifier.size(18.dp))
                 Text(
-                    text = "Anti-Freeze Concurrency: Max 2 parallel tasks to protect device memory and prevent UI stutter.",
+                    text = "Sequential Auto-Advance: When this batch of 7 completes, the next 7 are automatically queued without repeats until all $targetTotalMouzas mouzas finish.",
                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                    color = Slate600
+                    color = Slate700
                 )
             }
 
-            // Scrollable Task List
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1200,7 +2000,7 @@ fun DownloadTaskCard(task: DownloadTask) {
                         .padding(horizontal = 4.dp, vertical = 1.dp)
                 )
                 Text(
-                    text = task.recordType.code,
+                    text = task.recordTypeLabel,
                     style = MaterialTheme.typography.labelSmall.copy(
                         fontWeight = FontWeight.Bold,
                         fontSize = 10.sp,
@@ -1212,7 +2012,6 @@ fun DownloadTaskCard(task: DownloadTask) {
                 )
             }
 
-            // Status Badge
             when (task.status) {
                 TaskStatus.COMPLETED -> {
                     Row(
@@ -1271,7 +2070,7 @@ fun DownloadTaskCard(task: DownloadTask) {
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = "${task.upazilaNameBn} • Khatians: ${task.downloadedKhatians}/${task.totalKhatians}",
+                text = "${task.upazilaNameBn} (Batch #${task.batchNumber}) • Khatians: ${task.downloadedKhatians}/${task.totalKhatians}",
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                 color = Slate500
             )
