@@ -38,8 +38,9 @@ enum class TaskStatus {
     PAUSED
 }
 
+@Entity(tableName = "download_queue")
 data class DownloadTask(
-    val id: String,
+    @PrimaryKey val id: String,
     val mouzaId: String,
     val mouzaNameBn: String,
     val mouzaNameEn: String,

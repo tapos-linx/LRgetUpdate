@@ -8,6 +8,8 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.TypeConverters
+import com.example.data.model.DownloadTask
 import com.example.data.model.SavedRecord
 import kotlinx.coroutines.flow.Flow
 
@@ -26,9 +28,11 @@ interface SavedRecordDao {
     suspend fun clearAllRecords()
 }
 
-@Database(entities = [SavedRecord::class], version = 1, exportSchema = false)
+@Database(entities = [SavedRecord::class, DownloadTask::class], version = 2, exportSchema = false)
+@TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun savedRecordDao(): SavedRecordDao
+    abstract fun downloadQueueDao(): DownloadQueueDao
 
     companion object {
         @Volatile
@@ -40,7 +44,9 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "lr_mass_downloader.db"
-                ).build()
+                )
+                .fallbackToDestructiveMigration()
+                .build()
                 INSTANCE = instance
                 instance
             }

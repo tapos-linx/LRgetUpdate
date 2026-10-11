@@ -1,12 +1,9 @@
 package com.example.ui
 
 import android.app.Application
-import android.content.ContentValues
 import android.content.Context
-import android.media.MediaScannerConnection
-import android.os.Build
-import android.os.Environment
-import android.provider.MediaStore
+import android.net.Uri
+import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.AppDatabase
@@ -21,20 +18,20 @@ import com.example.data.model.SavedRecord
 import com.example.data.model.TaskStatus
 import com.example.data.model.Upazila
 import com.example.data.model.UpazilaFetchInfo
+import com.example.data.repository.DownloadRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
-import java.io.File
 import kotlin.random.Random
-import android.net.Uri
-import android.widget.Toast
 
 data class LRUiState(
     val selectedDistrictId: String = "cumilla",
@@ -61,9 +58,9 @@ data class LRUiState(
 class LRDownloaderViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = AppDatabase.getDatabase(application)
-    private val dao = db.savedRecordDao()
+    private val repository = DownloadRepository(db.savedRecordDao(), db.downloadQueueDao())
 
-    val savedRecords: StateFlow<List<SavedRecord>> = dao.getAllSavedRecords()
+    val savedRecords: StateFlow<List<SavedRecord>> = repository.savedRecords
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -76,6 +73,31 @@ class LRDownloaderViewModel(application: Application) : AndroidViewModel(applica
     // Bounded Concurrency Limiter: strictly max 2 concurrent downloads
     private val concurrencyLimiter = Semaphore(2)
     private val taskJobs = mutableMapOf<String, Job>()
+
+    init {
+        // Anti-Freeze Core: Persistent Queue Sync & Task Resumption
+        viewModelScope.launch {
+            // 1. Reset any tasks stuck in 'DOWNLOADING' to 'PENDING' for safe resumption
+            repository.resetInterruptedTasks()
+
+            // 2. Observe the persistent queue and keep UI in sync
+            repository.downloadQueue.onEach { persistentQueue ->
+                _uiState.value = _uiState.value.copy(
+                    queue = persistentQueue,
+                    downloadedMouzaIds = persistentQueue.filter { it.status == TaskStatus.COMPLETED }.map { it.mouzaId }.toSet()
+                )
+
+                // 3. Auto-resume Pending tasks if not paused
+                if (!_uiState.value.isPaused) {
+                    persistentQueue.filter { it.status == TaskStatus.PENDING }.forEach { task ->
+                        if (!taskJobs.containsKey(task.id)) {
+                            launchTaskWorker(task.id)
+                        }
+                    }
+                }
+            }.launchIn(viewModelScope)
+        }
+    }
 
     val allDistricts: List<District> = LandRecordsDataset.districts
 
@@ -116,10 +138,6 @@ class LRDownloaderViewModel(application: Application) : AndroidViewModel(applica
         )
     }
 
-    /**
-     * When an Upazila is selected, first fetch how many mouzas are in that upazila.
-     * Select strictly initial 7 mouzas for Batch 1.
-     */
     fun onUpazilaChanged(newUpazilaId: String?) {
         clearQueue()
         if (newUpazilaId == null) {
@@ -146,7 +164,6 @@ class LRDownloaderViewModel(application: Application) : AndroidViewModel(applica
             val batchSize = _uiState.value.batchSize
             val totalBatchesCount = (foundMouzaCount + batchSize - 1) / batchSize
 
-            // Select strictly the first 7 mouzas for initial batch queue
             val firstSevenIds = upazila.mouzas.take(batchSize).map { it.id }.toSet()
 
             val fetchInfo = UpazilaFetchInfo(
@@ -156,7 +173,7 @@ class LRDownloaderViewModel(application: Application) : AndroidViewModel(applica
                 districtNameBn = district.nameBn,
                 totalMouzaCount = foundMouzaCount,
                 batchCount = totalBatchesCount,
-                message = "Upazila Survey Index: Found $foundMouzaCount mouzas in ${upazila.nameBn}. Sequential Target set to all $foundMouzaCount mouzas in $totalBatchesCount batches."
+                message = "Upazila Survey Index: Found $foundMouzaCount mouzas in ${upazila.nameBn}."
             )
 
             _uiState.value = _uiState.value.copy(
@@ -277,22 +294,18 @@ class LRDownloaderViewModel(application: Application) : AndroidViewModel(applica
             )
         }
 
-        _uiState.value = _uiState.value.copy(
-            queue = _uiState.value.queue + newTasks
-        )
-
-        newTasks.forEach { task ->
-            launchTaskWorker(task.id)
+        viewModelScope.launch {
+            repository.insertTasksToQueue(newTasks)
         }
     }
 
     private fun launchTaskWorker(taskId: String) {
         val job = viewModelScope.launch {
             concurrencyLimiter.withPermit {
-                val currentTask = _uiState.value.queue.find { it.id == taskId } ?: return@withPermit
-                if (currentTask.status == TaskStatus.COMPLETED) return@withPermit
+                val task = repository.getTaskById(taskId) ?: return@withPermit
+                if (task.status == TaskStatus.COMPLETED) return@withPermit
 
-                updateTask(taskId) {
+                updateTaskSync(taskId) {
                     it.copy(status = TaskStatus.DOWNLOADING, progress = 5)
                 }
 
@@ -302,15 +315,16 @@ class LRDownloaderViewModel(application: Application) : AndroidViewModel(applica
                         delay(300)
                     }
 
-                    val exists = _uiState.value.queue.any { it.id == taskId }
-                    if (!exists) return@withPermit
+                    // Re-check existence and status
+                    val current = repository.getTaskById(taskId)
+                    if (current == null) return@withPermit
 
                     delay(160 + Random.nextLong(100))
 
                     val progress = (step * 10).coerceAtMost(100)
                     val speed = 320 + Random.nextInt(260)
 
-                    updateTask(taskId) { t ->
+                    updateTaskSync(taskId) { t ->
                         val downloaded = (progress * t.totalKhatians) / 100
                         t.copy(
                             progress = progress,
@@ -321,29 +335,25 @@ class LRDownloaderViewModel(application: Application) : AndroidViewModel(applica
                     }
                 }
 
-                val finished = _uiState.value.queue.find { it.id == taskId }
+                val finished = repository.getTaskById(taskId)
                 if (finished != null && finished.status == TaskStatus.COMPLETED) {
-                    val updatedDownloaded = _uiState.value.downloadedMouzaIds + finished.mouzaId
-                    _uiState.value = _uiState.value.copy(downloadedMouzaIds = updatedDownloaded)
+                    // Update UI state with downloaded ID
+                    _uiState.value = _uiState.value.copy(
+                        downloadedMouzaIds = _uiState.value.downloadedMouzaIds + finished.mouzaId
+                    )
 
-                    // Write individual Mouza record directly to phone storage: Download/LandRecords/
+                    // Physical file save
                     val currentDist = currentDistrict
                     val currentUpaz = currentUpazila
                     if (currentDist != null && currentUpaz != null) {
                         try {
-                            LandRecordStorageManager.saveMouzaRecordFile(
-                                getApplication(),
-                                finished,
-                                currentDist,
-                                currentUpaz
-                            )
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                        }
+                            LandRecordStorageManager.saveMouzaRecordFile(getApplication(), finished, currentDist, currentUpaz)
+                        } catch (e: Exception) { e.printStackTrace() }
                     }
 
+                    // Save to Vault
                     val sizeMb = String.format("%.2f MB", finished.fileSizeBytes / (1024.0 * 1024.0))
-                    dao.insertRecord(
+                    repository.insertSavedRecord(
                         SavedRecord(
                             id = finished.id,
                             mouzaId = finished.mouzaId,
@@ -363,6 +373,14 @@ class LRDownloaderViewModel(application: Application) : AndroidViewModel(applica
             }
         }
         taskJobs[taskId] = job
+        job.invokeOnCompletion { taskJobs.remove(taskId) }
+    }
+
+    private suspend fun updateTaskSync(taskId: String, transform: (DownloadTask) -> DownloadTask) {
+        val task = repository.getTaskById(taskId)
+        if (task != null) {
+            repository.updateTaskInQueue(transform(task))
+        }
     }
 
     private fun checkAndTriggerNextBatch() {
@@ -397,8 +415,9 @@ class LRDownloaderViewModel(application: Application) : AndroidViewModel(applica
     }
 
     private fun compileMasterArchive(district: District, upazila: Upazila) {
-        val totalKhatians = _uiState.value.queue.sumOf { it.totalKhatians }
-        val totalBytes = _uiState.value.queue.sumOf { it.fileSizeBytes }
+        val queue = _uiState.value.queue
+        val totalKhatians = queue.sumOf { it.totalKhatians }
+        val totalBytes = queue.sumOf { it.fileSizeBytes }
         val sizeMb = String.format("%.2f MB", totalBytes / (1024.0 * 1024.0))
         val typesText = _uiState.value.selectedRecordTypes.joinToString("+") { it.code }
         val fileName = "${district.nameEn}_${upazila.nameEn}_Master_Land_Records_2026.json"
@@ -422,28 +441,20 @@ class LRDownloaderViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = _uiState.value.copy(masterArchive = archive)
     }
 
-    /**
-     * One-Click Download: Saves Master JSON, TXT ledger, and CSV spreadsheet
-     * directly into the public Download/LandRecords folder on phone storage.
-     * Automatically clears temporary cache & memory while preserving downloaded records.
-     */
     fun downloadMasterFileToPhone(context: Context) {
         val archive = _uiState.value.masterArchive ?: return
         val upazila = currentUpazila ?: return
         val district = currentDistrict ?: return
 
         viewModelScope.launch {
-            val queueTasks = _uiState.value.queue
-
             val saveResult = LandRecordStorageManager.saveMasterLandRecordsArchive(
                 context = context,
                 archive = archive,
                 district = district,
                 upazila = upazila,
-                queueTasks = queueTasks
+                queueTasks = _uiState.value.queue
             )
 
-            // Automatically clear cache and app memory without removing downloaded records
             LandRecordStorageManager.clearCacheAndMemory(context)
 
             _uiState.value = _uiState.value.copy(
@@ -471,51 +482,43 @@ class LRDownloaderViewModel(application: Application) : AndroidViewModel(applica
 
     fun exportArchiveToSafUri(context: Context, uri: Uri) {
         val preview = _uiState.value.masterArchive?.fileContentPreview ?: ""
-        val success = LandRecordStorageManager.writeToSafUri(context, uri, preview)
-        if (success) {
-            Toast.makeText(context, "Archive saved to selected folder successfully!", Toast.LENGTH_LONG).show()
-        } else {
-            Toast.makeText(context, "Failed to save file to selected location.", Toast.LENGTH_SHORT).show()
+        viewModelScope.launch {
+            val success = LandRecordStorageManager.writeToSafUri(context, uri, preview)
+            if (success) {
+                Toast.makeText(context, "Archive saved successfully!", Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(context, "Failed to save file.", Toast.LENGTH_SHORT).show()
+            }
         }
-    }
-
-    fun clearAppMemoryAndCache(context: Context) {
-        LandRecordStorageManager.clearCacheAndMemory(context)
-    }
-
-    fun dismissCacheNotification() {
-        _uiState.value = _uiState.value.copy(cacheNotificationMessage = null)
-    }
-
-    private fun updateTask(taskId: String, transform: (DownloadTask) -> DownloadTask) {
-        val updated = _uiState.value.queue.map { task ->
-            if (task.id == taskId) transform(task) else task
-        }
-        _uiState.value = _uiState.value.copy(queue = updated)
     }
 
     fun togglePauseQueue() {
-        _uiState.value = _uiState.value.copy(isPaused = !_uiState.value.isPaused)
+        val nextPaused = !_uiState.value.isPaused
+        _uiState.value = _uiState.value.copy(isPaused = nextPaused)
     }
 
     fun clearQueue() {
         taskJobs.values.forEach { it.cancel() }
         taskJobs.clear()
-        _uiState.value = _uiState.value.copy(
-            queue = emptyList(),
-            isPaused = false
-        )
+        viewModelScope.launch {
+            repository.clearQueue()
+            _uiState.value = _uiState.value.copy(isPaused = false, queue = emptyList())
+        }
     }
 
     fun deleteSavedRecord(id: String) {
         viewModelScope.launch {
-            dao.deleteRecordById(id)
+            repository.deleteSavedRecord(id)
         }
     }
 
     fun clearAllSavedRecords() {
         viewModelScope.launch {
-            dao.clearAllRecords()
+            repository.clearSavedRecords()
         }
+    }
+
+    fun dismissCacheNotification() {
+        _uiState.value = _uiState.value.copy(cacheNotificationMessage = null)
     }
 }
