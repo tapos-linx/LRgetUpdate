@@ -52,6 +52,7 @@ data class LRUiState(
     val isShowingHistoryDialog: Boolean = false,
     val isShowingLedgerDialog: Boolean = false,
     val isShowingSaveSuccessDialog: Boolean = false,
+    val isShowingApkInfoDialog: Boolean = false,
     val cacheNotificationMessage: String? = null
 )
 
@@ -242,6 +243,10 @@ class LRDownloaderViewModel(application: Application) : AndroidViewModel(applica
 
     fun setShowLedgerDialog(show: Boolean) {
         _uiState.value = _uiState.value.copy(isShowingLedgerDialog = show)
+    }
+
+    fun setShowApkInfoDialog(show: Boolean) {
+        _uiState.value = _uiState.value.copy(isShowingApkInfoDialog = show)
     }
 
     fun queueSelectedDownloads() {

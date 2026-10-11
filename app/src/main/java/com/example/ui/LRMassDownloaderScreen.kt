@@ -1,5 +1,7 @@
 package com.example.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -46,6 +48,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.DoneAll
@@ -178,7 +181,8 @@ fun LRMassDownloaderScreen(
         topBar = {
             GovTechHeader(
                 savedRecordsCount = savedRecords.size,
-                onOpenSavedRecords = { viewModel.setShowHistoryDialog(true) }
+                onOpenSavedRecords = { viewModel.setShowHistoryDialog(true) },
+                onOpenApkInfo = { viewModel.setShowApkInfoDialog(true) }
             )
         }
     ) { innerPadding ->
@@ -351,6 +355,13 @@ fun LRMassDownloaderScreen(
                 viewModel.dismissSaveSuccessDialog()
                 viewModel.setShowLedgerDialog(true)
             }
+        )
+    }
+
+    // Direct 1-Click APK Download Dialog
+    if (uiState.isShowingApkInfoDialog) {
+        ApkDownloadDialog(
+            onDismiss = { viewModel.setShowApkInfoDialog(false) }
         )
     }
 }
@@ -960,7 +971,8 @@ fun MasterLedgerDialog(
 @Composable
 fun GovTechHeader(
     savedRecordsCount: Int,
-    onOpenSavedRecords: () -> Unit
+    onOpenSavedRecords: () -> Unit,
+    onOpenApkInfo: () -> Unit
 ) {
     val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     Surface(
@@ -1028,34 +1040,240 @@ fun GovTechHeader(
                     }
                 }
 
-                // Vault Button
-                OutlinedButton(
-                    onClick = onOpenSavedRecords,
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = Color.White,
-                        containerColor = EmeraldDark.copy(alpha = 0.7f)
-                    ),
-                    border = ButtonDefaults.outlinedButtonBorder.copy(
-                        brush = androidx.compose.ui.graphics.SolidColor(EmeraldLight.copy(alpha = 0.4f))
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.testTag("open_vault_button")
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.FolderSpecial,
-                        contentDescription = "Vault",
-                        modifier = Modifier.size(16.dp),
-                        tint = AmberAccent
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Vault ($savedRecordsCount)",
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
-                    )
+                    // APK / GitHub Button
+                    OutlinedButton(
+                        onClick = onOpenApkInfo,
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = Color.White,
+                            containerColor = EmeraldDark.copy(alpha = 0.7f)
+                        ),
+                        border = ButtonDefaults.outlinedButtonBorder.copy(
+                            brush = androidx.compose.ui.graphics.SolidColor(AmberAccent.copy(alpha = 0.7f))
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.testTag("open_apk_download_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CloudDownload,
+                            contentDescription = "APK",
+                            modifier = Modifier.size(16.dp),
+                            tint = AmberAccent
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "APK",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+
+                    // Vault Button
+                    OutlinedButton(
+                        onClick = onOpenSavedRecords,
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = Color.White,
+                            containerColor = EmeraldDark.copy(alpha = 0.7f)
+                        ),
+                        border = ButtonDefaults.outlinedButtonBorder.copy(
+                            brush = androidx.compose.ui.graphics.SolidColor(EmeraldLight.copy(alpha = 0.4f))
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.testTag("open_vault_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FolderSpecial,
+                            contentDescription = "Vault",
+                            modifier = Modifier.size(16.dp),
+                            tint = AmberAccent
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Vault ($savedRecordsCount)",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+fun ApkDownloadDialog(
+    onDismiss: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val downloadUrl = "https://github.com/tapos-cpl/LR-Mass-Downloader/releases/latest/download/LRMassDownloader.apk"
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(EmeraldContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CloudDownload,
+                        contentDescription = null,
+                        tint = EmeraldDark,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                Column {
+                    Text(
+                        text = "Download APK (One-Click)",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                        color = Slate900
+                    )
+                    Text(
+                        text = "GitHub Release • Direct Phone Installation",
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                        color = EmeraldDark
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "আপনি সরাসরি GitHub থেকে ওয়ান-ক্লিকে (One-Click) লেটেস্ট রিলিজ APK ডাউনলোড করে ফোনে ইনস্টল করতে পারবেন।",
+                    style = MaterialTheme.typography.bodyMedium.copy(color = Slate800, fontSize = 13.sp)
+                )
+
+                // Direct URL Card
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Slate100),
+                    border = CardDefaults.outlinedCardBorder().copy(
+                        brush = androidx.compose.ui.graphics.SolidColor(Slate300)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "🔗 ওয়ান-ক্লিক সরাসরি ডাউনলোড লিংক:",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = Slate700)
+                        )
+                        Text(
+                            text = downloadUrl,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 10.sp,
+                                color = EmeraldDark,
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                    }
+                }
+
+                // Fast Installation Tip Card (Fix for slow install)
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = AmberAccent.copy(alpha = 0.15f)),
+                    border = CardDefaults.outlinedCardBorder().copy(
+                        brush = androidx.compose.ui.graphics.SolidColor(AmberAccent)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "⚡ দ্রুত ১-২ সেকেন্ডে ইনস্টল করার নিয়ম:",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.ExtraBold, color = Slate900)
+                        )
+                        Text(
+                            text = "১. 'Download APK Now' বাটনে চাপলে সরাসরি ব্রাউজারে ডাউনলোড শুরু হবে।",
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, color = Slate800)
+                        )
+                        Text(
+                            text = "২. Google Play Protect 'Unrecognized app' বার্তা দিলে 'Install anyway' চাপুন। স্ক্যানের অপেক্ষা না করে সাথে সাথে ১ সেকেন্ডে ইনস্টল হয়ে যাবে।",
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, color = Slate800, fontWeight = FontWeight.SemiBold)
+                        )
+                    }
+                }
+
+                // Action Buttons inside Dialog
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            val clip = ClipData.newPlainText("LR Mass Downloader APK Link", downloadUrl)
+                            clipboard.setPrimaryClip(clip)
+                            Toast.makeText(context, "ডাউনলোড লিংক কপি করা হয়েছে!", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Copy Link", fontSize = 11.sp)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_SUBJECT, "LR Mass Downloader APK")
+                                putExtra(Intent.EXTRA_TEXT, "Download LR Mass Downloader (Bangladesh Land Records) APK:\n$downloadUrl")
+                            }
+                            context.startActivity(Intent.createChooser(shareIntent, "Share APK Link"))
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Share Link", fontSize = 11.sp)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    try {
+                        val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl)).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        context.startActivity(browserIntent)
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "ব্রাউজার ওপেন করা যায়নি", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary)
+            ) {
+                Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Download APK Now")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)

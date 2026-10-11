@@ -1,0 +1,88 @@
+name: Build & Release Android APK
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Create debug.keystore if missing
+        run: |
+          if [ ! -f debug.keystore ]; then
+            keytool -genkey -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - name: Grant Execute Permission to Gradle
+        run: chmod +x gradlew || true
+
+      - name: Build Debug APK with Gradle
+        run: ./gradlew assembleDebug --stacktrace || gradle assembleDebug --stacktrace
+
+      - name: Prepare APK Asset
+        run: |
+          mkdir -p release-output
+          cp app/build/outputs/apk/debug/app-debug.apk release-output/LRMassDownloader.apk
+          cp app/build/outputs/apk/debug/app-debug.apk release-output/LRMassDownloader-v1.0.apk
+          ls -la release-output/
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LRMassDownloader-APK
+          path: release-output/LRMassDownloader.apk
+          retention-days: 90
+
+      - name: Create GitHub Release (One-Click Download)
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        with:
+          tag_name: latest
+          name: "LR Mass Downloader Latest Release"
+          body: |
+            ### 📱 LR Mass Downloader - Bangladesh Land Records
+            
+            **One-Click Direct Download Link:**
+            👉 [Download LRMassDownloader.apk](https://github.com/${{ github.repository }}/releases/latest/download/LRMassDownloader.apk)
+            
+            #### Features included in this release:
+            - **Cumilla (17 Upazilas) & Brahmanbaria (9 Upazilas)** full land records dataset
+            - **Pure Cascading Hierarchy**: District ➔ Upazila ➔ Mouza
+            - **Upazila Mouza Survey Index**: Instant calculation of total mouzas count
+            - **Automated 7-Mouza Sequential Queue**: Automatically queues next 7 mouzas without repeating previously downloaded records
+            - **Select All Documents**: CS, SA, RS, and BRS/BS one-click selection
+            - **Anti-Freeze Concurrency Limiter**: Maximum 2 concurrent downloads
+            - **Master Archive Compilation**: Consolidates entire upazila into Master JSON, human-readable TXT ledger, and CSV table
+            - **Physical Phone Storage**: Directly indexed in `Download/LandRecords/` with Android MediaScanner
+            - **Auto-clears temporary cache** after master export to protect phone memory
+          files: |
+            release-output/LRMassDownloader.apk
+            release-output/LRMassDownloader-v1.0.apk
+          prerelease: false
+          draft: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
