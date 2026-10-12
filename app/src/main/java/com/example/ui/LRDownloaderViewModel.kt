@@ -19,6 +19,7 @@ import com.example.data.model.TaskStatus
 import com.example.data.model.Upazila
 import com.example.data.model.UpazilaFetchInfo
 import com.example.data.repository.DownloadRepository
+import com.example.data.worker.DownloadWorkManagerHelper
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,7 +54,10 @@ data class LRUiState(
     val isShowingLedgerDialog: Boolean = false,
     val isShowingSaveSuccessDialog: Boolean = false,
     val isShowingApkInfoDialog: Boolean = false,
-    val cacheNotificationMessage: String? = null
+    val cacheNotificationMessage: String? = null,
+    val isWorkManagerActive: Boolean = false,
+    val useWorkManagerBackgroundService: Boolean = true,
+    val antiBlockingDelayDescription: String = "400ms – 2,400ms Randomized Jitter"
 )
 
 class LRDownloaderViewModel(application: Application) : AndroidViewModel(application) {
@@ -76,6 +80,11 @@ class LRDownloaderViewModel(application: Application) : AndroidViewModel(applica
     private val taskJobs = mutableMapOf<String, Job>()
 
     init {
+        // Anti-Freeze Core: Observe WorkManager active state
+        DownloadWorkManagerHelper.isWorkRunningFlow(application).onEach { isRunning ->
+            _uiState.value = _uiState.value.copy(isWorkManagerActive = isRunning)
+        }.launchIn(viewModelScope)
+
         // Anti-Freeze Core: Persistent Queue Sync & Task Resumption
         viewModelScope.launch {
             // 1. Reset any tasks stuck in 'DOWNLOADING' to 'PENDING' for safe resumption
@@ -83,18 +92,31 @@ class LRDownloaderViewModel(application: Application) : AndroidViewModel(applica
 
             // 2. Observe the persistent queue and keep UI in sync
             repository.downloadQueue.onEach { persistentQueue ->
+                val completedIds = persistentQueue.filter { it.status == TaskStatus.COMPLETED }.map { it.mouzaId }.toSet()
                 _uiState.value = _uiState.value.copy(
                     queue = persistentQueue,
-                    downloadedMouzaIds = persistentQueue.filter { it.status == TaskStatus.COMPLETED }.map { it.mouzaId }.toSet()
+                    downloadedMouzaIds = completedIds
                 )
 
                 // 3. Auto-resume Pending tasks if not paused
                 if (!_uiState.value.isPaused) {
-                    persistentQueue.filter { it.status == TaskStatus.PENDING }.forEach { task ->
-                        if (!taskJobs.containsKey(task.id)) {
-                            launchTaskWorker(task.id)
+                    val hasPending = persistentQueue.any { it.status == TaskStatus.PENDING }
+                    if (hasPending) {
+                        if (_uiState.value.useWorkManagerBackgroundService) {
+                            DownloadWorkManagerHelper.enqueueDownloadWork(getApplication())
+                        } else {
+                            persistentQueue.filter { it.status == TaskStatus.PENDING }.forEach { task ->
+                                if (!taskJobs.containsKey(task.id)) {
+                                    launchTaskWorker(task.id)
+                                }
+                            }
                         }
                     }
+                }
+
+                // Check if current batch finished to advance or compile master
+                if (persistentQueue.isNotEmpty() && persistentQueue.all { it.status == TaskStatus.COMPLETED }) {
+                    checkAndTriggerNextBatch()
                 }
             }.launchIn(viewModelScope)
         }
@@ -301,6 +323,9 @@ class LRDownloaderViewModel(application: Application) : AndroidViewModel(applica
 
         viewModelScope.launch {
             repository.insertTasksToQueue(newTasks)
+            if (_uiState.value.useWorkManagerBackgroundService && !_uiState.value.isPaused) {
+                DownloadWorkManagerHelper.enqueueDownloadWork(getApplication(), replace = true)
+            }
         }
     }
 
@@ -500,15 +525,55 @@ class LRDownloaderViewModel(application: Application) : AndroidViewModel(applica
     fun togglePauseQueue() {
         val nextPaused = !_uiState.value.isPaused
         _uiState.value = _uiState.value.copy(isPaused = nextPaused)
+        if (nextPaused) {
+            DownloadWorkManagerHelper.cancelDownloadWork(getApplication())
+            taskJobs.values.forEach { it.cancel() }
+            taskJobs.clear()
+            viewModelScope.launch {
+                repository.resetInterruptedTasks()
+            }
+        } else {
+            if (_uiState.value.useWorkManagerBackgroundService) {
+                DownloadWorkManagerHelper.enqueueDownloadWork(getApplication(), replace = true)
+            }
+        }
     }
 
     fun clearQueue() {
+        DownloadWorkManagerHelper.cancelDownloadWork(getApplication())
         taskJobs.values.forEach { it.cancel() }
         taskJobs.clear()
         viewModelScope.launch {
             repository.clearQueue()
             _uiState.value = _uiState.value.copy(isPaused = false, queue = emptyList())
         }
+    }
+
+    fun setUseWorkManagerBackgroundService(enabled: Boolean) {
+        _uiState.value = _uiState.value.copy(useWorkManagerBackgroundService = enabled)
+        if (enabled) {
+            taskJobs.values.forEach { it.cancel() }
+            taskJobs.clear()
+            if (!_uiState.value.isPaused && _uiState.value.queue.any { it.status == TaskStatus.PENDING }) {
+                DownloadWorkManagerHelper.enqueueDownloadWork(getApplication(), replace = true)
+            }
+        } else {
+            DownloadWorkManagerHelper.cancelDownloadWork(getApplication())
+            if (!_uiState.value.isPaused) {
+                _uiState.value.queue.filter { it.status == TaskStatus.PENDING }.forEach { task ->
+                    if (!taskJobs.containsKey(task.id)) {
+                        launchTaskWorker(task.id)
+                    }
+                }
+            }
+        }
+    }
+
+    fun startBackgroundWorkManagerManually() {
+        if (_uiState.value.isPaused) {
+            _uiState.value = _uiState.value.copy(isPaused = false)
+        }
+        DownloadWorkManagerHelper.enqueueDownloadWork(getApplication(), replace = true)
     }
 
     fun deleteSavedRecord(id: String) {

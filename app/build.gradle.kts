@@ -1,4 +1,6 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.util.Properties
+import java.io.FileInputStream
 
 plugins {
   alias(libs.plugins.android.application)
@@ -8,6 +10,21 @@ plugins {
   alias(libs.plugins.google.services)
 }
 
+// Dynamic Automatic Versioning System
+val versionPropsFile = rootProject.file("version.properties")
+val versionProps = Properties()
+if (versionPropsFile.exists()) {
+  versionPropsFile.inputStream().use { versionProps.load(it) }
+}
+
+val majorVer = versionProps.getProperty("major", "1").toIntOrNull() ?: 1
+val minorVer = versionProps.getProperty("minor", "0").toIntOrNull() ?: 0
+val patchVer = versionProps.getProperty("patch", "3").toIntOrNull() ?: 3
+val buildVer = versionProps.getProperty("build", "103").toIntOrNull() ?: 103
+
+val computedVersionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: buildVer
+val computedVersionName = System.getenv("VERSION_NAME") ?: "$majorVer.$minorVer.$patchVer"
+
 android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
@@ -16,8 +33,8 @@ android {
     applicationId = "com.aistudio.lrmassdownloader.kxmpzq"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = computedVersionCode
+    versionName = computedVersionName
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -97,6 +114,7 @@ dependencies {
   // implementation(libs.androidx.navigation.compose)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
+  implementation(libs.androidx.work.runtime.ktx)
   // implementation(libs.coil.compose)
   implementation(libs.converter.moshi)
   implementation(libs.firebase.ai)

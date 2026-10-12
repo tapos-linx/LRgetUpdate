@@ -18,6 +18,12 @@ class DownloadRepository(
     suspend fun clearSavedRecords() = savedRecordDao.clearAllRecords()
 
     suspend fun getTaskById(taskId: String) = downloadQueueDao.getTaskById(taskId)
+    suspend fun getPendingTasks() = downloadQueueDao.getPendingTasks()
+    suspend fun getNextPendingTask() = downloadQueueDao.getNextPendingTask()
+    suspend fun getAllTasksDirect() = downloadQueueDao.getAllTasksDirect()
+    suspend fun getPendingCount() = downloadQueueDao.getPendingCount()
+    suspend fun getCompletedCount() = downloadQueueDao.getCompletedCount()
+    suspend fun getTotalCount() = downloadQueueDao.getTotalCount()
     suspend fun insertTasksToQueue(tasks: List<DownloadTask>) = downloadQueueDao.insertTasks(tasks)
     suspend fun insertTaskToQueue(task: DownloadTask) = downloadQueueDao.insertTask(task)
     suspend fun updateTaskInQueue(task: DownloadTask) = downloadQueueDao.updateTask(task)

@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -63,6 +64,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
@@ -83,6 +85,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -291,6 +295,10 @@ fun LRMassDownloaderScreen(
                     targetTotalMouzas = uiState.targetTotalMouzas,
                     downloadedMouzasCount = uiState.downloadedMouzaIds.size,
                     isPaused = uiState.isPaused,
+                    isWorkManagerActive = uiState.isWorkManagerActive,
+                    useWorkManagerService = uiState.useWorkManagerBackgroundService,
+                    onToggleWorkManagerService = { viewModel.setUseWorkManagerBackgroundService(it) },
+                    antiBlockingDescription = uiState.antiBlockingDelayDescription,
                     onTogglePause = { viewModel.togglePauseQueue() },
                     onClearQueue = { viewModel.clearQueue() },
                     tasks = uiState.queue
@@ -1106,7 +1114,18 @@ fun ApkDownloadDialog(
     onDismiss: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val downloadUrl = "https://github.com/tapos-cpl/LR-Mass-Downloader/releases/latest/download/LRMassDownloader.apk"
+    var customRepo by remember { mutableStateOf("tapos-cpl/LR-Mass-Downloader") }
+    var isEditingRepo by remember { mutableStateOf(false) }
+
+    val downloadUrl = "https://github.com/$customRepo/releases/latest/download/LRMassDownloader.apk"
+    val actionsUrl = "https://github.com/$customRepo/actions"
+    val releasesUrl = "https://github.com/$customRepo/releases"
+
+    val currentVersion = try {
+        "${com.example.BuildConfig.VERSION_NAME} (Build ${com.example.BuildConfig.VERSION_CODE})"
+    } catch (e: Exception) {
+        "1.0.3 (Build 103)"
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1136,8 +1155,8 @@ fun ApkDownloadDialog(
                         color = Slate900
                     )
                     Text(
-                        text = "GitHub Release • Direct Phone Installation",
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                        text = "Installed: v$currentVersion",
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
                         color = EmeraldDark
                     )
                 }
@@ -1146,11 +1165,11 @@ fun ApkDownloadDialog(
         text = {
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
-                    text = "আপনি সরাসরি GitHub থেকে ওয়ান-ক্লিকে (One-Click) লেটেস্ট রিলিজ APK ডাউনলোড করে ফোনে ইনস্টল করতে পারবেন।",
-                    style = MaterialTheme.typography.bodyMedium.copy(color = Slate800, fontSize = 13.sp)
+                    text = "GitHub Releases থেকে স্বয়ংক্রিয়ভাবে প্রস্তুত হওয়া ওয়ান-ক্লিক (One-Click) লেটেস্ট APK ডাউনলোড করুন।",
+                    style = MaterialTheme.typography.bodyMedium.copy(color = Slate800, fontSize = 12.sp)
                 )
 
                 // Direct URL Card
@@ -1164,20 +1183,65 @@ fun ApkDownloadDialog(
                 ) {
                     Column(
                         modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "🔗 সরাসরি ১-ক্লিক ডাউনলোড লিংক:",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = Slate700)
+                            )
+                            TextButton(
+                                onClick = { isEditingRepo = !isEditingRepo },
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                            ) {
+                                Text(if (isEditingRepo) "Done" else "Change Repo", fontSize = 10.sp, color = EmeraldDark)
+                            }
+                        }
+
+                        if (isEditingRepo) {
+                            OutlinedTextField(
+                                value = customRepo,
+                                onValueChange = { customRepo = it.trim() },
+                                label = { Text("GitHub Repo (owner/repo)", fontSize = 10.sp) },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                                textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp)
+                            )
+                        } else {
+                            Text(
+                                text = downloadUrl,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 10.sp,
+                                    color = EmeraldDark,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                        }
+                    }
+                }
+
+                // 404 Error Fix & Status Advice Card
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Slate200.copy(alpha = 0.6f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         Text(
-                            text = "🔗 ওয়ান-ক্লিক সরাসরি ডাউনলোড লিংক:",
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = Slate700)
+                            text = "💡 404 Error দেখালে করণীয়:",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.ExtraBold, color = Slate900)
                         )
                         Text(
-                            text = downloadUrl,
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 10.sp,
-                                color = EmeraldDark,
-                                fontWeight = FontWeight.Bold
-                            )
+                            text = "কমিট পুশ করার পর GitHub Actions এ APK বিল্ড হতে ১-২ মিনিট লাগে। বিল্ড শেষ হলে লিংকটি সক্রিয় হবে। নিচের 'Live Build Status' থেকে প্রগ্রেস দেখুন।",
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, color = Slate700)
                         )
                     }
                 }
@@ -1192,28 +1256,24 @@ fun ApkDownloadDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
-                        modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        modifier = Modifier.padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         Text(
                             text = "⚡ দ্রুত ১-২ সেকেন্ডে ইনস্টল করার নিয়ম:",
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.ExtraBold, color = Slate900)
                         )
                         Text(
-                            text = "১. 'Download APK Now' বাটনে চাপলে সরাসরি ব্রাউজারে ডাউনলোড শুরু হবে।",
-                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, color = Slate800)
-                        )
-                        Text(
-                            text = "২. Google Play Protect 'Unrecognized app' বার্তা দিলে 'Install anyway' চাপুন। স্ক্যানের অপেক্ষা না করে সাথে সাথে ১ সেকেন্ডে ইনস্টল হয়ে যাবে।",
-                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, color = Slate800, fontWeight = FontWeight.SemiBold)
+                            text = "Google Play Protect 'Unrecognized app' বার্তা দিলে 'Install anyway' চাপুন। স্ক্যানের অপেক্ষা না করে সাথে সাথে ১ সেকেন্ডে ইনস্টল হয়ে যাবে।",
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, color = Slate800, fontWeight = FontWeight.SemiBold)
                         )
                     }
                 }
 
-                // Action Buttons inside Dialog
+                // Action Buttons inside Dialog: Copy & Share
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     OutlinedButton(
                         onClick = {
@@ -1223,11 +1283,12 @@ fun ApkDownloadDialog(
                             Toast.makeText(context, "ডাউনলোড লিংক কপি করা হয়েছে!", Toast.LENGTH_SHORT).show()
                         },
                         modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp)
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
                     ) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Copy Link", fontSize = 11.sp)
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(13.dp))
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text("Copy Link", fontSize = 10.sp)
                     }
 
                     OutlinedButton(
@@ -1240,11 +1301,52 @@ fun ApkDownloadDialog(
                             context.startActivity(Intent.createChooser(shareIntent, "Share APK Link"))
                         },
                         modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp)
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
                     ) {
-                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Share Link", fontSize = 11.sp)
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(13.dp))
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text("Share Link", fontSize = 10.sp)
+                    }
+                }
+
+                // Check Actions & Releases Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    TextButton(
+                        onClick = {
+                            try {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(actionsUrl)).apply {
+                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                }
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "ব্রাউজার খোলা যায়নি", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(vertical = 4.dp)
+                    ) {
+                        Text("Live Build Status", fontSize = 10.sp, color = EmeraldDark, fontWeight = FontWeight.Bold)
+                    }
+
+                    TextButton(
+                        onClick = {
+                            try {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(releasesUrl)).apply {
+                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                }
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "ব্রাউজার খোলা যায়নি", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(vertical = 4.dp)
+                    ) {
+                        Text("All Releases", fontSize = 10.sp, color = EmeraldDark, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -1927,6 +2029,10 @@ fun QueueHudCard(
     targetTotalMouzas: Int,
     downloadedMouzasCount: Int,
     isPaused: Boolean,
+    isWorkManagerActive: Boolean,
+    useWorkManagerService: Boolean,
+    onToggleWorkManagerService: (Boolean) -> Unit,
+    antiBlockingDescription: String,
     onTogglePause: () -> Unit,
     onClearQueue: () -> Unit,
     tasks: List<DownloadTask>
@@ -2083,6 +2189,97 @@ fun QueueHudCard(
                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
                     color = Slate700
                 )
+            }
+
+            // WorkManager Background Service & Anti-Blocking Protection Banner
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isWorkManagerActive) EmeraldContainer.copy(alpha = 0.45f) else Slate50
+                ),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (isWorkManagerActive) EmeraldPrimary.copy(alpha = 0.4f) else Slate200
+                ),
+                modifier = Modifier.fillMaxWidth().testTag("workmanager_status_card")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isWorkManagerActive) EmeraldPrimary else Slate400)
+                            )
+                            Column {
+                                Text(
+                                    text = "WorkManager Background Service",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold, fontSize = 13.sp),
+                                    color = if (isWorkManagerActive) EmeraldDark else Slate800
+                                )
+                                Text(
+                                    text = if (isWorkManagerActive) "Processing in Background • UI 100% Fluid & Responsive" else "Anti-Freeze Engine Standby",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                    color = if (isWorkManagerActive) EmeraldPrimary else Slate500
+                                )
+                            }
+                        }
+
+                        Switch(
+                            checked = useWorkManagerService,
+                            onCheckedChange = onToggleWorkManagerService,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = EmeraldPrimary,
+                                checkedTrackColor = EmeraldContainer
+                            ),
+                            modifier = Modifier.testTag("workmanager_service_toggle")
+                        )
+                    }
+
+                    // Anti-Blocking details badge with randomized delay info
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color.White.copy(alpha = 0.9f))
+                            .border(1.dp, Slate200, RoundedCornerShape(10.dp))
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Security,
+                            contentDescription = null,
+                            tint = EmeraldPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Anti-Blocking Protection: $antiBlockingDescription",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold, fontSize = 11.sp),
+                                color = Slate800
+                            )
+                            Text(
+                                text = "Randomized request intervals prevent server-side IP blocking and 429 rate limits.",
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
+                                color = Slate600
+                            )
+                        }
+                    }
+                }
             }
 
             Box(

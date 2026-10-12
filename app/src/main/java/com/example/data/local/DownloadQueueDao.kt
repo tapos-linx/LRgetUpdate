@@ -16,6 +16,24 @@ interface DownloadQueueDao {
     @Query("SELECT * FROM download_queue WHERE id = :taskId")
     suspend fun getTaskById(taskId: String): DownloadTask?
 
+    @Query("SELECT * FROM download_queue WHERE status = 'PENDING' ORDER BY timestamp ASC")
+    suspend fun getPendingTasks(): List<DownloadTask>
+
+    @Query("SELECT * FROM download_queue WHERE status = 'PENDING' ORDER BY timestamp ASC LIMIT 1")
+    suspend fun getNextPendingTask(): DownloadTask?
+
+    @Query("SELECT * FROM download_queue")
+    suspend fun getAllTasksDirect(): List<DownloadTask>
+
+    @Query("SELECT COUNT(*) FROM download_queue WHERE status = 'PENDING'")
+    suspend fun getPendingCount(): Int
+
+    @Query("SELECT COUNT(*) FROM download_queue WHERE status = 'COMPLETED'")
+    suspend fun getCompletedCount(): Int
+
+    @Query("SELECT COUNT(*) FROM download_queue")
+    suspend fun getTotalCount(): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTasks(tasks: List<DownloadTask>)
 
