@@ -19,6 +19,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -45,6 +46,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Assignment
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -196,6 +198,13 @@ fun LRMassDownloaderScreen(
                 modifier = modifier
             )
         }
+        AppScreen.KHOTIYAN_FORM -> {
+            KhotiyanFormScreen(
+                viewModel = viewModel,
+                onNavigateBack = { viewModel.navigateToScreen(AppScreen.DOWNLOADER) },
+                modifier = modifier
+            )
+        }
         else -> {
             Scaffold(
                 modifier = modifier
@@ -205,6 +214,7 @@ fun LRMassDownloaderScreen(
                     GovTechHeader(
                         savedRecordsCount = savedRecords.size,
                         queueCount = activeAndPendingCount,
+                        onOpenKhotiyanForm = { viewModel.navigateToScreen(AppScreen.KHOTIYAN_FORM) },
                         onOpenQueueStatus = { viewModel.navigateToScreen(AppScreen.QUEUE_STATUS) },
                         onOpenSavedRecords = { viewModel.setShowHistoryDialog(true) },
                         onOpenApkInfo = { viewModel.setShowApkInfoDialog(true) }
@@ -215,6 +225,18 @@ fun LRMassDownloaderScreen(
                         containerColor = Color.White,
                         tonalElevation = 4.dp
                     ) {
+                        NavigationBarItem(
+                            selected = false,
+                            onClick = { viewModel.navigateToScreen(AppScreen.KHOTIYAN_FORM) },
+                            icon = {
+                                Icon(
+                                    imageVector = Icons.Default.Assignment,
+                                    contentDescription = "Khotiyan Form"
+                                )
+                            },
+                            label = { Text("Khotiyan Form") },
+                            modifier = Modifier.testTag("nav_item_khotiyan_form")
+                        )
                         NavigationBarItem(
                             selected = true,
                             onClick = { viewModel.navigateToScreen(AppScreen.DOWNLOADER) },
@@ -325,6 +347,67 @@ fun LRMassDownloaderScreen(
                             viewModel.setShowLedgerDialog(true)
                         }
                     )
+                }
+            }
+
+            // Multi-Step Input Form Banner
+            item {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { viewModel.navigateToScreen(AppScreen.KHOTIYAN_FORM) }
+                        .testTag("banner_open_khotiyan_form"),
+                    shape = RoundedCornerShape(14.dp),
+                    color = EmeraldContainer.copy(alpha = 0.5f),
+                    border = BorderStroke(1.dp, EmeraldLight.copy(alpha = 0.6f))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(EmeraldDark),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Assignment,
+                                    contentDescription = null,
+                                    tint = AmberAccent,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "বহু-ধাপ খতিয়ান ইনপুট ফর্ম (Multi-Step Form)",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = EmeraldDark
+                                )
+                                Text(
+                                    text = "কুমিল্লা/ব্রাহ্মণবাড়িয়া, মৌজা ও খতিয়ান নম্বর দিয়ে সরাসরি কিউ করুন",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                    color = Slate600
+                                )
+                            }
+                        }
+                        Button(
+                            onClick = { viewModel.navigateToScreen(AppScreen.KHOTIYAN_FORM) },
+                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text("ফর্ম খুলুন", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
+                        }
+                    }
                 }
             }
 
@@ -1067,6 +1150,7 @@ fun MasterLedgerDialog(
 fun GovTechHeader(
     savedRecordsCount: Int,
     queueCount: Int = 0,
+    onOpenKhotiyanForm: () -> Unit = {},
     onOpenQueueStatus: () -> Unit = {},
     onOpenSavedRecords: () -> Unit,
     onOpenApkInfo: () -> Unit
@@ -1141,6 +1225,32 @@ fun GovTechHeader(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    // Multi-Step Form Button
+                    OutlinedButton(
+                        onClick = onOpenKhotiyanForm,
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = Color.White,
+                            containerColor = EmeraldDark.copy(alpha = 0.7f)
+                        ),
+                        border = ButtonDefaults.outlinedButtonBorder.copy(
+                            brush = androidx.compose.ui.graphics.SolidColor(EmeraldLight.copy(alpha = 0.4f))
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.testTag("header_open_khotiyan_form_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Assignment,
+                            contentDescription = "Form",
+                            modifier = Modifier.size(16.dp),
+                            tint = AmberAccent
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Form",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+
                     // Queue Monitor Button
                     OutlinedButton(
                         onClick = onOpenQueueStatus,

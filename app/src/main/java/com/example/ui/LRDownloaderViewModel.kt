@@ -36,6 +36,7 @@ import kotlin.random.Random
 
 enum class AppScreen {
     DOWNLOADER,
+    KHOTIYAN_FORM,
     QUEUE_STATUS,
     SAVED_VAULT
 }
@@ -292,6 +293,48 @@ class LRDownloaderViewModel(application: Application) : AndroidViewModel(applica
         if (candidates.isEmpty()) return
 
         enqueueBatch(candidates, district, upazila, state.currentBatchNumber)
+    }
+
+    fun queueSpecificKhotiyanDownload(
+        district: District,
+        upazila: Upazila,
+        mouza: Mouza,
+        khotiyanLabel: String,
+        recordTypes: Set<RecordType>,
+        totalKhatians: Int = 1
+    ) {
+        val timestamp = System.currentTimeMillis()
+        val count = totalKhatians.coerceAtLeast(1) * recordTypes.size.coerceAtLeast(1)
+        val fileSizeBytes = count * 95000L
+        val taskId = "khotiyan-${mouza.id}-$timestamp"
+
+        val task = DownloadTask(
+            id = taskId,
+            mouzaId = mouza.id,
+            mouzaNameBn = "${mouza.nameBn} ($khotiyanLabel)",
+            mouzaNameEn = "${mouza.nameEn} ($khotiyanLabel)",
+            jlNo = mouza.jlNo,
+            upazilaNameBn = upazila.nameBn,
+            districtNameBn = district.nameBn,
+            recordTypes = recordTypes.ifEmpty { setOf(RecordType.RS) },
+            status = TaskStatus.PENDING,
+            progress = 0,
+            totalKhatians = count,
+            downloadedKhatians = 0,
+            fileSizeBytes = fileSizeBytes,
+            speedKbps = 0,
+            batchNumber = _uiState.value.currentBatchNumber,
+            timestamp = timestamp
+        )
+
+        viewModelScope.launch {
+            repository.insertTasksToQueue(listOf(task))
+            if (_uiState.value.useWorkManagerBackgroundService && !_uiState.value.isPaused) {
+                DownloadWorkManagerHelper.enqueueDownloadWork(getApplication(), replace = true)
+            } else if (!_uiState.value.isPaused) {
+                launchTaskWorker(taskId)
+            }
+        }
     }
 
     private fun enqueueBatch(
