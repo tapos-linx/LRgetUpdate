@@ -100,10 +100,11 @@ This project features an automated versioning and release system:
   - **BRS / BS (Bangladesh Survey / বি.আর.এস / বি.এস)**
 - "Select All" toggle quickly selects or deselects all four record types simultaneously.
 
-### 4. 🛡️ Anti-Freeze Concurrency Management
-- Limits concurrent downloads to maximum **2 active tasks at a time**.
-- Remaining tasks remain in `PENDING` state until an active slot frees up.
-- Prevents Android UI thread freezing, memory overflow, and network packet starvation.
+### 4. 🛡️ Background WorkManager Service & Anti-Blocking Protection
+- **Jetpack WorkManager Background Engine**: Runs asynchronously via `DownloadQueueWorker` (tied to `FOREGROUND_SERVICE_DATA_SYNC` and persistent status notifications) so downloads proceed smoothly even if the app is backgrounded or the screen is turned off.
+- **Randomized Jitter Delays (Anti-Blocking)**: Government servers (e-Porcha / DLR&S) detect rapid bot queries. The service injects randomized delays (400ms – 2,400ms jitter between request batches and cooldowns between mouzas) to prevent server-side 429 rate limits and IP blocking.
+- **100% Fluid & Responsive UI**: UI state updates reactively via Room database Flow listeners, guaranteeing zero dropped frames or UI thread freezes.
+- **Direct User Controls**: Pause/Resume buttons and a dedicated WorkManager toggle card in the Queue HUD.
 
 ### 5. 📁 Master Archive Synthesis & Phone Storage
 - Exports **Master JSON**, **Human-Readable TXT Ledger**, and **CSV Table**.

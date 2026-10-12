@@ -56,6 +56,7 @@ import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.FolderSpecial
+import androidx.compose.material.icons.filled.FormatListNumbered
 import androidx.compose.material.icons.filled.GetApp
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Layers
@@ -69,6 +70,8 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -80,6 +83,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -178,18 +183,94 @@ fun LRMassDownloaderScreen(
         }
     }
 
-    Scaffold(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Slate50),
-        topBar = {
-            GovTechHeader(
-                savedRecordsCount = savedRecords.size,
-                onOpenSavedRecords = { viewModel.setShowHistoryDialog(true) },
-                onOpenApkInfo = { viewModel.setShowApkInfoDialog(true) }
+    val activeAndPendingCount = downloadingTasks + pendingTasks
+
+    when (uiState.currentScreen) {
+        AppScreen.QUEUE_STATUS -> {
+            QueueStatusScreen(
+                viewModel = viewModel,
+                onNavigateBack = { viewModel.navigateToScreen(AppScreen.DOWNLOADER) },
+                modifier = modifier
             )
         }
-    ) { innerPadding ->
+        else -> {
+            Scaffold(
+                modifier = modifier
+                    .fillMaxSize()
+                    .background(Slate50),
+                topBar = {
+                    GovTechHeader(
+                        savedRecordsCount = savedRecords.size,
+                        queueCount = activeAndPendingCount,
+                        onOpenQueueStatus = { viewModel.navigateToScreen(AppScreen.QUEUE_STATUS) },
+                        onOpenSavedRecords = { viewModel.setShowHistoryDialog(true) },
+                        onOpenApkInfo = { viewModel.setShowApkInfoDialog(true) }
+                    )
+                },
+                bottomBar = {
+                    NavigationBar(
+                        containerColor = Color.White,
+                        tonalElevation = 4.dp
+                    ) {
+                        NavigationBarItem(
+                            selected = true,
+                            onClick = { viewModel.navigateToScreen(AppScreen.DOWNLOADER) },
+                            icon = {
+                                Icon(
+                                    imageVector = Icons.Default.CloudDownload,
+                                    contentDescription = "Downloader"
+                                )
+                            },
+                            label = { Text("Downloader", fontWeight = FontWeight.Bold) },
+                            modifier = Modifier.testTag("nav_item_downloader")
+                        )
+                        NavigationBarItem(
+                            selected = false,
+                            onClick = { viewModel.navigateToScreen(AppScreen.QUEUE_STATUS) },
+                            icon = {
+                                BadgedBox(
+                                    badge = {
+                                        if (activeAndPendingCount > 0) {
+                                            Badge(containerColor = if (downloadingTasks > 0) BlueAccent else AmberDark) {
+                                                Text("$activeAndPendingCount")
+                                            }
+                                        }
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.FormatListNumbered,
+                                        contentDescription = "Queue Status"
+                                    )
+                                }
+                            },
+                            label = { Text("Queue Status") },
+                            modifier = Modifier.testTag("nav_item_queue_status")
+                        )
+                        NavigationBarItem(
+                            selected = false,
+                            onClick = { viewModel.setShowHistoryDialog(true) },
+                            icon = {
+                                BadgedBox(
+                                    badge = {
+                                        if (savedRecords.isNotEmpty()) {
+                                            Badge(containerColor = EmeraldPrimary) {
+                                                Text("${savedRecords.size}")
+                                            }
+                                        }
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.FolderOpen,
+                                        contentDescription = "Vault"
+                                    )
+                                }
+                            },
+                            label = { Text("Vault") },
+                            modifier = Modifier.testTag("nav_item_vault")
+                        )
+                    }
+                }
+            ) { innerPadding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -301,7 +382,8 @@ fun LRMassDownloaderScreen(
                     antiBlockingDescription = uiState.antiBlockingDelayDescription,
                     onTogglePause = { viewModel.togglePauseQueue() },
                     onClearQueue = { viewModel.clearQueue() },
-                    tasks = uiState.queue
+                    tasks = uiState.queue,
+                    onOpenFullQueueScreen = { viewModel.navigateToScreen(AppScreen.QUEUE_STATUS) }
                 )
             }
 
@@ -329,6 +411,8 @@ fun LRMassDownloaderScreen(
             }
         }
     }
+}
+}
 
     // Saved Records Vault Dialog
     if (uiState.isShowingHistoryDialog) {
@@ -979,6 +1063,8 @@ fun MasterLedgerDialog(
 @Composable
 fun GovTechHeader(
     savedRecordsCount: Int,
+    queueCount: Int = 0,
+    onOpenQueueStatus: () -> Unit = {},
     onOpenSavedRecords: () -> Unit,
     onOpenApkInfo: () -> Unit
 ) {
@@ -1052,6 +1138,44 @@ fun GovTechHeader(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    // Queue Monitor Button
+                    OutlinedButton(
+                        onClick = onOpenQueueStatus,
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = Color.White,
+                            containerColor = EmeraldDark.copy(alpha = 0.7f)
+                        ),
+                        border = ButtonDefaults.outlinedButtonBorder.copy(
+                            brush = androidx.compose.ui.graphics.SolidColor(
+                                if (queueCount > 0) AmberAccent else EmeraldLight.copy(alpha = 0.4f)
+                            )
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.testTag("header_open_queue_button")
+                    ) {
+                        BadgedBox(
+                            badge = {
+                                if (queueCount > 0) {
+                                    Badge(containerColor = AmberAccent) {
+                                        Text("$queueCount", color = Slate900)
+                                    }
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FormatListNumbered,
+                                contentDescription = "Queue Status",
+                                modifier = Modifier.size(16.dp),
+                                tint = if (queueCount > 0) AmberAccent else Color.White
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Queue",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+
                     // APK / GitHub Button
                     OutlinedButton(
                         onClick = onOpenApkInfo,
@@ -2035,7 +2159,8 @@ fun QueueHudCard(
     antiBlockingDescription: String,
     onTogglePause: () -> Unit,
     onClearQueue: () -> Unit,
-    tasks: List<DownloadTask>
+    tasks: List<DownloadTask>,
+    onOpenFullQueueScreen: () -> Unit = {}
 ) {
     Card(
         shape = RoundedCornerShape(24.dp),
@@ -2325,6 +2450,32 @@ fun QueueHudCard(
                         }
                     }
                 }
+            }
+
+            // Button to open dedicated full Queue Status & Progress screen
+            Button(
+                onClick = onOpenFullQueueScreen,
+                colors = ButtonDefaults.buttonColors(containerColor = Slate800),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("open_queue_screen_button"),
+                contentPadding = PaddingValues(vertical = 12.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.FormatListNumbered,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = AmberAccent
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Open Full Queue Monitor & Progress Bars ➔",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                )
             }
         }
     }

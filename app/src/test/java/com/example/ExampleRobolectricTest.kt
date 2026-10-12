@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.model.LandRecordsDataset
 import com.example.data.model.RecordType
+import com.example.ui.AppScreen
 import com.example.ui.LRDownloaderViewModel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -107,5 +108,39 @@ class ExampleRobolectricTest {
         )
         assertNotNull(result)
         assertTrue(result.primaryDisplayPath.contains("LandRecords"))
+    }
+
+    @Test
+    fun testWorkManagerBackgroundServiceConfiguration() = runTest {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val viewModel = LRDownloaderViewModel(app)
+
+        // Verify default WorkManager configuration
+        assertTrue(viewModel.uiState.value.useWorkManagerBackgroundService)
+        assertTrue(viewModel.uiState.value.antiBlockingDelayDescription.contains("Jitter"))
+
+        // Verify toggle functionality
+        viewModel.setUseWorkManagerBackgroundService(false)
+        assertFalse(viewModel.uiState.value.useWorkManagerBackgroundService)
+
+        viewModel.setUseWorkManagerBackgroundService(true)
+        assertTrue(viewModel.uiState.value.useWorkManagerBackgroundService)
+    }
+
+    @Test
+    fun testQueueStatusScreenNavigation() = runTest {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val viewModel = LRDownloaderViewModel(app)
+
+        // Verify initial screen
+        assertEquals(AppScreen.DOWNLOADER, viewModel.uiState.value.currentScreen)
+
+        // Navigate to Queue Status screen
+        viewModel.navigateToScreen(AppScreen.QUEUE_STATUS)
+        assertEquals(AppScreen.QUEUE_STATUS, viewModel.uiState.value.currentScreen)
+
+        // Navigate back to Downloader screen
+        viewModel.navigateToScreen(AppScreen.DOWNLOADER)
+        assertEquals(AppScreen.DOWNLOADER, viewModel.uiState.value.currentScreen)
     }
 }

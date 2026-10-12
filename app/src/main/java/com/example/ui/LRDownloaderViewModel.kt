@@ -34,6 +34,12 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlin.random.Random
 
+enum class AppScreen {
+    DOWNLOADER,
+    QUEUE_STATUS,
+    SAVED_VAULT
+}
+
 data class LRUiState(
     val selectedDistrictId: String = "cumilla",
     val selectedUpazilaId: String? = null,
@@ -57,7 +63,8 @@ data class LRUiState(
     val cacheNotificationMessage: String? = null,
     val isWorkManagerActive: Boolean = false,
     val useWorkManagerBackgroundService: Boolean = true,
-    val antiBlockingDelayDescription: String = "400ms – 2,400ms Randomized Jitter"
+    val antiBlockingDelayDescription: String = "400ms – 2,400ms Randomized Jitter",
+    val currentScreen: AppScreen = AppScreen.DOWNLOADER
 )
 
 class LRDownloaderViewModel(application: Application) : AndroidViewModel(application) {
@@ -590,5 +597,9 @@ class LRDownloaderViewModel(application: Application) : AndroidViewModel(applica
 
     fun dismissCacheNotification() {
         _uiState.value = _uiState.value.copy(cacheNotificationMessage = null)
+    }
+
+    fun navigateToScreen(screen: AppScreen) {
+        _uiState.value = _uiState.value.copy(currentScreen = screen)
     }
 }
