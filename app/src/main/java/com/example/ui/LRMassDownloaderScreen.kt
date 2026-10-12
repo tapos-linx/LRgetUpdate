@@ -1,5 +1,6 @@
 package com.example.ui
 
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -59,10 +60,12 @@ import androidx.compose.material.icons.filled.FolderSpecial
 import androidx.compose.material.icons.filled.FormatListNumbered
 import androidx.compose.material.icons.filled.GetApp
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.InstallMobile
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
@@ -1251,6 +1254,73 @@ fun ApkDownloadDialog(
         "1.0.3 (Build 103)"
     }
 
+    // Helper: Find or copy current app's APK for direct installation/sharing
+    fun getLocalApkFile(): File? {
+        return try {
+            val sourceDir = context.applicationInfo?.sourceDir
+            if (sourceDir != null && File(sourceDir).exists()) {
+                val srcFile = File(sourceDir)
+                val targetFile = File(context.cacheDir, "LRMassDownloader-v$currentVersion.apk")
+                if (!targetFile.exists() || targetFile.length() != srcFile.length()) {
+                    srcFile.copyTo(targetFile, overwrite = true)
+                }
+                targetFile
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    // Helper: Trigger direct APK install on Android device
+    fun triggerInstallLocalApk() {
+        try {
+            val apkFile = getLocalApkFile()
+            if (apkFile != null && apkFile.exists()) {
+                val apkUri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    apkFile
+                )
+                val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(apkUri, "application/vnd.android.package-archive")
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
+                }
+                context.startActivity(installIntent)
+            } else {
+                Toast.makeText(context, "APK ফাইল পাওয়া যায়নি", Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            Toast.makeText(context, "ইনস্টলার চালু করতে ব্যর্থ: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // Helper: Share or export APK file directly (WhatsApp, Drive, Bluetooth, etc.)
+    fun shareLocalApkFile() {
+        try {
+            val apkFile = getLocalApkFile()
+            if (apkFile != null && apkFile.exists()) {
+                val apkUri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    apkFile
+                )
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/vnd.android.package-archive"
+                    putExtra(Intent.EXTRA_STREAM, apkUri)
+                    putExtra(Intent.EXTRA_SUBJECT, "LR Mass Downloader APK (v$currentVersion)")
+                    flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                }
+                context.startActivity(Intent.createChooser(shareIntent, "Share LR Mass Downloader APK"))
+            } else {
+                Toast.makeText(context, "APK ফাইল এক্সপোর্ট করা যায়নি", Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            Toast.makeText(context, "শেয়ার করতে ব্যর্থ: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -1274,12 +1344,12 @@ fun ApkDownloadDialog(
                 }
                 Column {
                     Text(
-                        text = "Download APK (One-Click)",
+                        text = "Download & Install APK",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
                         color = Slate900
                     )
                     Text(
-                        text = "Installed: v$currentVersion",
+                        text = "Active Build: v$currentVersion",
                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
                         color = EmeraldDark
                     )
@@ -1291,12 +1361,75 @@ fun ApkDownloadDialog(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    text = "GitHub Releases থেকে স্বয়ংক্রিয়ভাবে প্রস্তুত হওয়া ওয়ান-ক্লিক (One-Click) লেটেস্ট APK ডাউনলোড করুন।",
-                    style = MaterialTheme.typography.bodyMedium.copy(color = Slate800, fontSize = 12.sp)
-                )
+                // Primary Instant Option: Direct Local APK Install/Share
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = EmeraldContainer.copy(alpha = 0.5f)),
+                    border = CardDefaults.outlinedCardBorder().copy(
+                        brush = androidx.compose.ui.graphics.SolidColor(EmeraldLight)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.InstallMobile,
+                                contentDescription = null,
+                                tint = EmeraldDark,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "📲 সরাসরি ইনস্টল ও শেয়ার (০% ইন্টারনেট খরচ):",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = EmeraldDark
+                                )
+                            )
+                        }
+                        Text(
+                            text = "বর্তমান অ্যাপটি সরাসরি আপনার ডিভাইসে ইনস্টল করুন অথবা ফাইল হিসেবে হোয়াটসঅ্যাপ/ড্রাইভে পাঠান। কোনো 404 ত্রুটি নেই!",
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, color = Slate800)
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Button(
+                                onClick = { triggerInstallLocalApk() },
+                                colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
+                            ) {
+                                Icon(Icons.Default.InstallMobile, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("সরাসরি ইনস্টল", fontSize = 11.sp)
+                            }
+                            OutlinedButton(
+                                onClick = { shareLocalApkFile() },
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = EmeraldDark),
+                                border = ButtonDefaults.outlinedButtonBorder.copy(
+                                    brush = androidx.compose.ui.graphics.SolidColor(EmeraldPrimary)
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp)
+                            ) {
+                                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("APK ফাইল পাঠান", fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
 
-                // Direct URL Card
+                // GitHub Releases Link Card
                 Card(
                     shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.cardColors(containerColor = Slate100),
@@ -1315,7 +1448,7 @@ fun ApkDownloadDialog(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "🔗 সরাসরি ১-ক্লিক ডাউনলোড লিংক:",
+                                text = "🌐 GitHub Releases ডাউনলোড লিংক:",
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = Slate700)
                             )
                             TextButton(
@@ -1331,6 +1464,7 @@ fun ApkDownloadDialog(
                                 value = customRepo,
                                 onValueChange = { customRepo = it.trim() },
                                 label = { Text("GitHub Repo (owner/repo)", fontSize = 10.sp) },
+                                placeholder = { Text("username/repository-name", fontSize = 10.sp) },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
                                 textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp)
@@ -1349,33 +1483,12 @@ fun ApkDownloadDialog(
                     }
                 }
 
-                // 404 Error Fix & Status Advice Card
+                // 404 Error Fix & Root Cause Card
                 Card(
                     shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = Slate200.copy(alpha = 0.6f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
-                        Text(
-                            text = "💡 404 Error দেখালে করণীয়:",
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.ExtraBold, color = Slate900)
-                        )
-                        Text(
-                            text = "কমিট পুশ করার পর GitHub Actions এ APK বিল্ড হতে ১-২ মিনিট লাগে। বিল্ড শেষ হলে লিংকটি সক্রিয় হবে। নিচের 'Live Build Status' থেকে প্রগ্রেস দেখুন।",
-                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, color = Slate700)
-                        )
-                    }
-                }
-
-                // Fast Installation Tip Card (Fix for slow install)
-                Card(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = AmberAccent.copy(alpha = 0.15f)),
+                    colors = CardDefaults.cardColors(containerColor = AmberAccent.copy(alpha = 0.12f)),
                     border = CardDefaults.outlinedCardBorder().copy(
-                        brush = androidx.compose.ui.graphics.SolidColor(AmberAccent)
+                        brush = androidx.compose.ui.graphics.SolidColor(AmberAccent.copy(alpha = 0.5f))
                     ),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -1384,12 +1497,12 @@ fun ApkDownloadDialog(
                         verticalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         Text(
-                            text = "⚡ দ্রুত ১-২ সেকেন্ডে ইনস্টল করার নিয়ম:",
+                            text = "💡 কেন 404 Error দেখায় এবং সমাধান:",
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.ExtraBold, color = Slate900)
                         )
                         Text(
-                            text = "Google Play Protect 'Unrecognized app' বার্তা দিলে 'Install anyway' চাপুন। স্ক্যানের অপেক্ষা না করে সাথে সাথে ১ সেকেন্ডে ইনস্টল হয়ে যাবে।",
-                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, color = Slate800, fontWeight = FontWeight.SemiBold)
+                            text = "১. রিপোজিটরি এখনও GitHub-এ পুশ না করা থাকলে বা নাম ভিন্ন হলে 404 আসে। 'Change Repo' বাটনে চাপ দিয়ে আপনার সঠিক GitHub Repo সেট করুন।\n২. পুশ করার পর GitHub Actions এ APK তৈরি হতে ১-২ মিনিট লাগে। নিচে 'Live Build Status' থেকে দেখে নিন।",
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, color = Slate700)
                         )
                     }
                 }
@@ -1491,7 +1604,7 @@ fun ApkDownloadDialog(
             ) {
                 Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Download APK Now")
+                Text("GitHub থেকে ডাউনলোড")
             }
         },
         dismissButton = {

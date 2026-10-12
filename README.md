@@ -10,31 +10,44 @@
 
 ---
 
-## 📥 One-Click APK Direct Download
+## 📥 How to Get & Install the APK File
 
-To install on your Android device with **one click**, use the direct download links below:
+### Option 1: Direct Download from AI Studio Build (Instant — 0 Seconds)
+If you are developing or testing this project in **AI Studio**:
+1. Tap the **Settings** / **Export** menu in AI Studio.
+2. Select **"Download APK"** or **"Generate APK"**.
+3. Your device or browser will download the compiled `app-debug.apk` immediately without waiting for GitHub.
+
+### Option 2: In-App Direct APK Install & Share (Zero Internet)
+Inside the running Android app:
+1. Tap the **"APK"** button in the top GovTech header bar.
+2. Tap **"সরাসরি ইনস্টল" (Direct Install)** — Android's package installer launches immediately to install the APK!
+3. Or tap **"APK ফাইল পাঠান" (Share APK File)** to send the `.apk` file directly via WhatsApp, Bluetooth, Nearby Share, or Google Drive.
+
+### Option 3: GitHub Releases (Auto CI/CD Build)
 
 | Download Type | Direct Link | Description |
 | :--- | :--- | :--- |
-| 🚀 **Direct 1-Click APK (Latest)** | [⬇️ **Download LRMassDownloader.apk**](https://github.com/tapos-cpl/LR-Mass-Downloader/releases/latest/download/LRMassDownloader.apk) | Always downloads the newest auto-built APK binary directly to your phone. |
-| 🔗 **Relative Repo Link** | [⬇️ **Download Latest Release APK**](../../releases/latest/download/LRMassDownloader.apk) | Works within any GitHub repository or fork without 404 errors. |
+| 🔗 **Relative Repo Link (No 404)** | [⬇️ **Download Latest Release APK**](../../releases/latest/download/LRMassDownloader.apk) | Adapts dynamically to any GitHub repo fork/name. |
 | 📦 **All Releases & Versions** | [📂 **View All Releases & Version History**](../../releases) | Browse all previous versions and changelogs. |
-| ⚙️ **Live Build Status** | [📊 **GitHub Actions Live Runs**](../../actions) | Real-time CI/CD build logs and artifact downloads. |
+| ⚙️ **Live Build Status** | [📊 **GitHub Actions Live Runs**](../../actions) | Watch the automated Gradle build build the APK. |
 
 ---
 
-## 💡 How the 404 Error is Solved
+## 💡 Why Does GitHub Return a "404 Not Found" Error?
 
-If you previously encountered a **404 Not Found** error when clicking the APK download link, here is why and how it is resolved:
+If you see a `404 Not Found` error when opening a GitHub APK download link, it is due to one of three common causes:
 
-1. **GitHub Actions Build Duration**:
-   - Whenever code is committed or pushed to GitHub, GitHub Actions starts a new build in the cloud.
-   - It takes approximately **1 to 2 minutes** to compile the Android app and upload the APK to GitHub Releases.
-   - While the build is running, GitHub does not have the file yet and will return `404`.
-   - **Solution**: Visit the [GitHub Actions Tab](../../actions) to watch the build finish. Once the green checkmark appears, the download link goes live immediately!
-2. **Repository Name Compatibility**:
-   - If your repository on GitHub is named differently (for example `lr-mass-downloader` in lowercase or under another GitHub account), a hardcoded link will return 404.
-   - **Solution**: The relative link `[Download Latest Release APK](../../releases/latest/download/LRMassDownloader.apk)` automatically adapts to your exact repository name!
+1. **Repository Has Not Been Pushed to GitHub Yet**:
+   - The remote repository `tapos-cpl/LR-Mass-Downloader` has not yet been pushed to your GitHub account.
+   - **Solution**: Follow the [One-Command Push Guide](#-connecting-to-github--auto-release) below to push your code to your GitHub account (`git push -u origin main --tags`). Once pushed, the repository is created and GitHub Actions triggers automatically.
+2. **Repository Name or Account Mismatch**:
+   - If your GitHub username is different or your repository is named differently (e.g. `lr-mass-downloader` in lowercase), any hardcoded link to `tapos-cpl/LR-Mass-Downloader` returns `404`.
+   - **Solution**: In the app's **APK Dialog**, tap **"Change Repo"** and enter your exact `username/repository-name` to generate valid links for your repo!
+3. **GitHub Actions Build Still in Progress**:
+   - After pushing code, GitHub Actions takes **1 to 2 minutes** to compile the Android app and upload the APK to GitHub Releases.
+   - Before the build completes, the release asset does not exist yet and GitHub returns `404`.
+   - **Solution**: Visit your repository's [GitHub Actions Tab](../../actions) and wait for the green checkmark (✅). As soon as the build finishes, the download link is live!
 
 ---
 
